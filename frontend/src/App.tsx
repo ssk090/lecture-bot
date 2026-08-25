@@ -1,14 +1,17 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { Download, FileText, Loader2, Mic, Save, Square, Upload, WandSparkles, X } from 'lucide-react';
-import { marked } from 'marked';
 import { useSession } from './store';
 import { chunkTranscript } from './chunk';
 import { useAutoTitle, useStudyPack, useTranscribe } from './hooks';
 import { useSessionThreads } from './hooks/useSessionThreads';
-import { GenerationLoader } from './components/GenerationLoader';
-import { Panel } from './components/Panel';
-import { StreamingText } from './components/StreamingText';
+import { AppHeader } from './components/AppHeader';
+import { ErrorBanner } from './components/ErrorBanner';
+import { Hero } from './components/Hero';
+import { StatusLine } from './components/StatusLine';
+import { StudyPack } from './components/StudyPack';
 import { ThreadSidebar } from './components/ThreadSidebar';
+import { Toolbar } from './components/Toolbar';
+import { TranscriptWorkspace } from './components/TranscriptWorkspace';
+import { WorkspaceFooter } from './components/WorkspaceFooter';
 
 // assistant-ui (and its ~230 kB) loads only when the chat drawer opens
 const ChatDrawer = lazy(() => import('./components/assistant-ui/ChatDrawer'));
@@ -16,16 +19,15 @@ const ChatDrawer = lazy(() => import('./components/assistant-ui/ChatDrawer'));
 export function App() {
   const {
     transcript,
-    liveTranscript,
     notes,
-    error,
     sessionId,
+    liveTranscript,
     setTranscript,
-    setLiveTranscript,
     setNotes,
+    setLiveTranscript,
     appendNotes,
     appendTranscript,
-    setError
+    setError,
   } = useSession();
   const transcribe = useTranscribe();
   const autoTitle = useAutoTitle();
@@ -35,8 +37,6 @@ export function App() {
   const [wordCount, setWordCount] = useState(0);
   const [busy, setBusy] = useState('');
   const [tab, setTab] = useState<'write' | 'preview'>('write');
-  const audioInput = useRef<HTMLInputElement>(null);
-  const transcriptInput = useRef<HTMLInputElement>(null);
   const recorder = useRef<MediaRecorder | null>(null);
   const recognition = useRef<any>(null);
   const chunks = useRef<Blob[]>([]);
@@ -116,7 +116,7 @@ export function App() {
   async function runStudy() {
     const parts = chunkTranscript(transcript);
     if (!parts.length) return;
-    const targetId = useSession.getState().sessionId; // anchor to the active session
+    const targetId = sessionId; // anchor to the active session
     setError('');
     setTab('write');
     setNotes('');
@@ -124,23 +124,13 @@ export function App() {
       for (let i = 0; i < parts.length; i++) {
         if (useSession.getState().sessionId !== targetId) break; // user switched threads
         setBusy(`Generating study pack, part ${i + 1} of ${parts.length}…`);
-        const notes = await study.mutateAsync(parts[i]);
+        const generated = await study.mutateAsync(parts[i]);
         if (useSession.getState().sessionId !== targetId) break;
-        appendNotes(`## Part ${i + 1}\n\n${notes}`);
+        appendNotes(`## Part ${i + 1}\n\n${generated}`);
       }
     } finally {
       setBusy('');
     }
-  }
-
-  function download() {
-    if (!notes) return;
-    const url = URL.createObjectURL(new Blob([notes], { type: 'text/markdown' }));
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'study-pack.md';
-    a.click();
-    URL.revokeObjectURL(url);
   }
 
   const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusy);
@@ -151,24 +141,7 @@ export function App() {
 
   return (
     <main className="app-shell">
-      <input ref={audioInput} className="sr-only" type="file" accept="audio/*,video/*" onChange={(e) => uploadAudio(e.target.files?.[0])} />
-      <input
-        ref={transcriptInput}
-        className="sr-only"
-        type="file"
-        accept=".txt,.md,.srt,.vtt,text/plain"
-        onChange={(e) => uploadTranscript(e.target.files?.[0])}
-      />
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">&gt;_</span>
-          <span>lecture.bot</span>
-          <span className="version">v0.4.2</span>
-        </div>
-        <div className="top-meta">
-          <span className="status-dot" /> local session <span className="slash">/</span> no data leaves your browser
-        </div>
-      </header>
+      <AppHeader />
       <div className="workspace">
         <ThreadSidebar
           sessions={sessions.data ?? []}
@@ -179,146 +152,23 @@ export function App() {
           onDelete={removeSession}
         />
         <div className="content">
-          <div className="intro">
-            <div>
-              <p className="eyebrow">/ workspace / lecture</p>
-              <h1>
-                Turn lectures into
-                <br />
-                <span>something you can use.</span>
-              </h1>
-            </div>
-            <p className="intro-copy">
-              Record or upload a lecture.
-              <br />
-              Get a study pack back.
-            </p>
-          </div>
-
-          <div className="toolbar">
-            <button className="cli-button" onClick={() => audioInput.current?.click()}>
-              <Upload size={15} /> upload audio/video
-            </button>
-            <button className="cli-button" onClick={() => transcriptInput.current?.click()}>
-              <FileText size={15} /> upload transcript
-            </button>
-            <span className="toolbar-divider" />
-            <button className={`cli-button ${recording ? 'recording' : ''}`} onClick={recording ? stop : start}>
-              {recording ? <Square size={13} /> : <Mic size={15} />} {recording ? 'stop & transcribe' : 'start mic'}
-            </button>
-            <button className="cli-button primary" onClick={runStudy} disabled={Boolean(busy) || !transcript.trim()}>
-              <WandSparkles size={15} /> make study pack
-            </button>
-            <button className="cli-button" onClick={saveCurrent} disabled={Boolean(busy) || (!notes && !transcript.trim())}>
-              <Save size={15} /> save session
-            </button>
-          </div>
-
-          {error && (
-            <div className="error" role="alert">
-              <X size={15} /> {error}
-            </div>
-          )}
-
-          <div className="status-line" aria-live="polite">
-            <span className={`status-icon ${busy ? 'spinning' : ''}`}>
-              {busy ? <Loader2 size={15} /> : <span className="ready-mark">✓</span>}
-            </span>
-            <span>{busy ? status : recording ? status : <span className="shimmer shimmer-repeat-delay-1500">{status}</span>}</span>
-            {busy && <span className="cursor" />}
-          </div>
-
-          <div className="transcript-grid">
-            <Panel label="live transcript" hint="browser captions">
-              <div className="panel-content live-content" aria-live="polite">
-                {recording ? (
-                  <>
-                    <div className="py-2">
-                      <GenerationLoader label="Listening…" tick={tick} variant="squares" horizontal />
-                    </div>
-                    {liveTranscript ? (
-                      <StreamingText
-                        segments={[{ text: liveTranscript }]}
-                        count={wordCount}
-                        streaming
-                        className="max-w-none min-h-0"
-                      />
-                    ) : (
-                      <p>Waiting for speech to be detected…</p>
-                    )}
-                  </>
-                ) : liveTranscript ? (
-                  <>
-                    <StreamingText
-                      segments={[{ text: liveTranscript }]}
-                      count={wordCount}
-                      streaming={false}
-                      className="max-w-none min-h-0"
-                    />
-                    <p className="live-note">Captured by browser captions. Finish it in the final transcript below.</p>
-                  </>
-                ) : (
-                  <p>
-                    Press <span className="mono-inline">start mic</span> to see live captions while you record,
-                    or upload an audio/video file or transcript instead.
-                  </p>
-                )}
-              </div>
-            </Panel>
-            <Panel label="final transcript" hint="editable">
-              <textarea
-                aria-label="Final transcript"
-                value={transcript}
-                onChange={(e) => setTranscript(e.target.value)}
-                placeholder="Paste a transcript or record a lecture…"
-              />
-            </Panel>
-          </div>
-
-          <Panel
-            label="study pack"
-            hint={sessionId ? `session ${sessionId.slice(-6)} saved` : 'generated markdown'}
-            className="study-panel"
-          >
-            <div className="tabs">
-              <button className={tab === 'write' ? 'tab-active' : ''} onClick={() => setTab('write')}>
-                Write
-              </button>
-              <button className={tab === 'preview' ? 'tab-active' : ''} onClick={() => setTab('preview')}>
-                Preview
-              </button>
-              <span className="tab-file">
-                <FileText size={13} /> study-pack.md
-              </span>
-              <button
-                className="tab-action"
-                onClick={download}
-                disabled={!notes || Boolean(busy)}
-                title="Download markdown file"
-                style={{ marginLeft: 16 }}
-              >
-                <Download size={13} /> download .md
-              </button>
-            </div>
-            {tab === 'write' ? (
-              <textarea
-                className="markdown-editor"
-                aria-label="Markdown study pack"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Your generated study pack will appear here."
-              />
-            ) : notes ? (
-              <article className="markdown-preview" dangerouslySetInnerHTML={{ __html: marked(notes) }} />
-            ) : (
-              <div className="markdown-preview">Nothing to preview yet.</div>
-            )}
-          </Panel>
-
-          <footer>
-            <span>lecture.bot is a local-first tool for focused learning.</span>
-            <span>parakeet stt / opencode llm</span>
-          </footer>
+          <Hero />
+          <Toolbar
+            recording={recording}
+            busy={Boolean(busy)}
+            canMake={!!transcript.trim()}
+            canSave={!(notes.trim() === '' && transcript.trim() === '')}
+            onUploadAudio={uploadAudio}
+            onUploadTranscript={uploadTranscript}
+            onToggleMic={recording ? stop : start}
+            onMakePack={runStudy}
+            onSave={saveCurrent}
+          />
+          <ErrorBanner />
+          <StatusLine busy={Boolean(busy)} recording={recording} status={status} />
+          <TranscriptWorkspace recording={recording} tick={tick} wordCount={wordCount} />
+          <StudyPack busy={Boolean(busy)} tab={tab} onTab={setTab} />
+          <WorkspaceFooter />
         </div>
       </div>
       {drawerId && (
