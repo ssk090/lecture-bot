@@ -47,6 +47,7 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
       // claim the id only if the workspace is still unsaved (no race with newSession/openSession)
       if (useSession.getState().sessionId !== null) return null;
       setSessionId(id);
+      void sessions.refetch(); // surface the newly created session in the sidebar
     }
     if (!isCurrentSession(id)) return null;
     await updateSession(id, partial).catch(() => {});
