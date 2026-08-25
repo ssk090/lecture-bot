@@ -1,42 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { Check, ChevronRight, Download, FileText, Loader2, Mic, Save, Square, Upload, WandSparkles, X } from 'lucide-react';
+import { Download, FileText, Loader2, Mic, Save, Square, Upload, WandSparkles, X } from 'lucide-react';
 import { marked } from 'marked';
 import { useSession } from './store';
 import { chunkTranscript } from './chunk';
 import { useStudyPack, useTranscribe } from './hooks';
-import { listSessions, saveSession, type Session } from './api';
+import { useSessionThreads } from './hooks/useSessionThreads';
 import { GenerationLoader } from './components/GenerationLoader';
+import { Panel } from './components/Panel';
 import { StreamingText } from './components/StreamingText';
-
-const steps = ['Listen', 'Transcribe', 'Synthesize', 'Review'];
-
-function FlowRail({ active }: { active: number }) {
-  return (
-    <aside className="rail">
-      <div className="rail-title">/ flow</div>
-      {steps.map((step, i) => (
-        <div className={`flow-step ${i <= active ? 'is-active' : ''}`} key={step}>
-          <span className="flow-dot">{i < active ? <Check size={12} /> : String(i + 1).padStart(2, '0')}</span>
-          <span>{step}</span>
-          {i < steps.length - 1 && <ChevronRight size={13} className="flow-arrow" />}
-        </div>
-      ))}
-    </aside>
-  );
-}
-
-function Panel({ label, hint, className = '', children }: { label: string; hint?: string; className?: string; children: React.ReactNode }) {
-  return (
-    <section className={`panel ${className}`}>
-      <div className="panel-bar">
-        <span>{label}</span>
-        {hint && <span className="panel-hint">{hint}</span>}
-      </div>
-      {children}
-    </section>
-  );
-}
+import { ThreadSidebar } from './components/ThreadSidebar';
 
 export function App() {
   const {
@@ -50,8 +22,7 @@ export function App() {
     setNotes,
     appendNotes,
     appendTranscript,
-    setError,
-    setSessionId
+    setError
   } = useSession();
   const transcribe = useTranscribe();
   const study = useStudyPack();
@@ -164,29 +135,7 @@ export function App() {
     URL.revokeObjectURL(url);
   }
 
-  const sessions = useQuery({ queryKey: ['sessions'], queryFn: listSessions });
-
-  async function save() {
-    if (!notes.trim() || !transcript.trim()) return;
-    setBusy('Saving session…');
-    try {
-      setError('');
-      const result = await saveSession(sessionId, transcript, notes);
-      setSessionId(result.id);
-      await sessions.refetch();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : 'Save failed. Is MongoDB running?');
-    } finally {
-      setBusy('');
-    }
-  }
-
-  function openSession(session: Session) {
-    setSessionId(session.id);
-    setTranscript(session.transcript);
-    setNotes(session.notes);
-    setError('');
-  }
+  const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusy);
 
   const status = busy || (recording ? 'Listening for audio input…' : 'Ready. Add a lecture to begin.');
 
@@ -211,7 +160,13 @@ export function App() {
         </div>
       </header>
       <div className="workspace">
-        <FlowRail active={notes ? 3 : transcript ? 2 : recording ? 1 : 0} />
+        <ThreadSidebar
+          sessions={sessions.data ?? []}
+          activeId={sessionId}
+          onNew={newSession}
+          onOpen={openSession}
+          onDelete={removeSession}
+        />
         <div className="content">
           <div className="intro">
             <div>
@@ -243,7 +198,7 @@ export function App() {
             <button className="cli-button primary" onClick={runStudy} disabled={Boolean(busy) || !transcript.trim()}>
               <WandSparkles size={15} /> make study pack
             </button>
-            <button className="cli-button" onClick={save} disabled={!notes || !transcript.trim() || Boolean(busy)}>
+            <button className="cli-button" onClick={saveCurrent} disabled={Boolean(busy) || (!notes && !transcript.trim())}>
               <Save size={15} /> save session
             </button>
           </div>

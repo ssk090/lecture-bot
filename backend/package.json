@@ -10,7 +10,7 @@
     "cors": "latest",
     "dotenv": "latest",
     "express": "latest",
-    "mongodb": "^7.6.0",
+    "mongodb": "^6.21.0",
     "multer": "latest"
   },
   "devDependencies": {

@@ -111,46 +111,119 @@ footer {
   padding: 52px clamp(18px, 4vw, 64px) 38px;
   gap: 46px;
 }
-.rail {
-  width: 110px;
-  flex: 0 0 110px;
-  font-family: var(--font-mono);
-  color: #52525b;
+.thread-sidebar {
+  width: 260px;
+  flex: 0 0 260px;
+  border: 1px solid var(--border);
+  background: #0d0d0f;
+  padding: 14px;
+  align-self: start;
+  position: sticky;
+  top: 20px;
 }
-.rail-title {
-  margin-bottom: 25px;
-  color: #71717a;
-}
-.flow-step {
+.thread-head,
+.thread-search,
+.thread-item {
   display: flex;
-  gap: 8px;
   align-items: center;
-  position: relative;
-  min-height: 48px;
 }
-.flow-dot {
-  border: 1px solid #3f3f46;
-  color: #71717a;
-  font-size: 10px;
-  width: 22px;
-  height: 22px;
+.thread-head {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.thread-head .eyebrow {
+  margin-bottom: 5px;
+}
+.thread-head h2 {
+  margin: 0;
+  color: #e4e4e7;
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.04em;
+}
+.icon-button {
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
-}
-.flow-step.is-active {
-  color: #d4d4d8;
-}
-.flow-step.is-active .flow-dot {
+  border: 1px solid #3f3f46;
+  background: transparent;
   color: var(--primary);
+}
+.icon-button:hover,
+.delete-thread:hover {
+  background: #d4d4d8;
+  color: #0a0a0b;
+  border-color: #d4d4d8;
+}
+.thread-search {
+  gap: 8px;
+  border: 1px solid #29292d;
+  padding: 8px 10px;
+  color: #71717a;
+  margin-bottom: 12px;
+}
+.thread-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #d4d4d8;
+  font: inherit;
+}
+.thread-list {
+  display: grid;
+  gap: 6px;
+}
+.thread-item {
+  border: 1px solid transparent;
+  background: #111114;
+}
+.thread-item.is-active {
   border-color: var(--primary);
 }
-.flow-arrow {
-  position: absolute;
-  left: 5px;
-  top: 37px;
-  transform: rotate(90deg);
-  color: #3f3f46;
+.thread-item > button:first-child {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  padding: 10px;
+  border: 0;
+  background: transparent;
+  color: #d4d4d8;
+}
+.thread-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.thread-item small,
+.empty-thread {
+  color: #71717a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.delete-thread {
+  margin-right: 6px;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #29292d;
+  background: transparent;
+  color: #71717a;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.thread-item:hover .delete-thread,
+.delete-thread:focus-visible {
+  opacity: 1;
+}
+.empty-thread {
+  padding: 12px 4px;
 }
 .content {
   min-width: 0;
@@ -514,8 +587,10 @@ footer {
     padding-top: 30px;
     display: block;
   }
-  .rail {
-    display: none;
+  .thread-sidebar {
+    position: static;
+    width: 100%;
+    margin-bottom: 20px;
   }
   .intro {
     display: block;

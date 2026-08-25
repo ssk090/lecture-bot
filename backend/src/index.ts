@@ -80,7 +80,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
   }
 });
 
-async function askOpencode(transcript: string) {
+async function askOpencode(transcript: string, system = SYSTEM_PROMPT) {
   const model = process.env.OPENCODE_MODEL ?? "opencode-go/deepseek-v4-flash";
   const [providerID, ...modelParts] = model.split("/");
   const modelID = modelParts.join("/");
@@ -108,7 +108,7 @@ async function askOpencode(transcript: string) {
     path: { id: session.data.id },
     body: {
       model: modelID ? { providerID, modelID } : undefined,
-      system: SYSTEM_PROMPT,
+      system,
       parts: [{ type: "text", text: transcript }],
     },
   });
@@ -140,6 +140,22 @@ app.post("/api/study", async (req, res) => {
     res
       .status(500)
       .json({ error: error instanceof Error ? error.message : "notes failed" });
+  }
+});
+
+app.post("/api/title", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) return res.json({ title: "New session" });
+  try {
+    const title = await askOpencode(
+      text.slice(0, 4000),
+      "Name this study session in 3-7 words. Return only the title, no quotes or punctuation at the end.",
+    );
+    res.json({ title: title.split("\n")[0].replace(/^['\"]|['\".]$/g, "").slice(0, 80) || "New session" });
+  } catch (error) {
+    res
+      .status(500)
+      .json({ error: error instanceof Error ? error.message : "title failed" });
   }
 });
 
@@ -190,13 +206,9 @@ app.get("/api/sessions/:id", async (req, res) => {
 
 app.post("/api/sessions", async (req, res) => {
   const transcript = String(req.body?.transcript ?? "").trim();
-  if (!transcript)
-    return res.status(400).json({ error: "transcript required" });
   try {
     const now = new Date();
-    const title =
-      String(req.body?.title ?? "").trim() ||
-      `Lecture ${now.toISOString().slice(0, 16).replace("T", " ")}`;
+    const title = String(req.body?.title ?? "").trim() || "New session";
     const result = await (await sessionsCol()).insertOne({
       title,
       transcript,
