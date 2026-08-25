@@ -2,6 +2,8 @@
 
 Lecture Bot turns recorded lectures, uploaded audio, or pasted transcripts into study notes, flashcards, and quizzes. Each lecture is kept in its own persisted session, and a chat drawer lets you ask questions that are answered strictly from that session's content.
 
+<img width="2286" height="1308" alt="image" src="https://github.com/user-attachments/assets/39aebb3d-cbdb-4cd2-872e-0eb2742566ad" />
+
 ## Features
 
 - Record audio in the browser or upload an audio/video file.
