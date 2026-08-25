@@ -2,8 +2,8 @@ import { create } from 'zustand';
 
 // Single client-side record for the active session. Every async path that
 // writes here anchors to the session id it started with and abandons the
-// write if the user switches threads mid-flight (see App.runStudy and
-// useSessionThreads.saveCurrent).
+// write if the user switches threads mid-flight. Use `isCurrentSession` for
+// that anchor check instead of reaching into the store directly.
 
 type SessionState = {
   transcript: string;
@@ -34,3 +34,8 @@ export const useSession = create<SessionState>((set) => ({
   setError: (error) => set({ error }),
   setSessionId: (sessionId) => set({ sessionId })
 }));
+
+/** True when `id` is the still-active workspace session (race-guard anchor). */
+export function isCurrentSession(id: string | null | undefined): boolean {
+  return useSession.getState().sessionId === id;
+}

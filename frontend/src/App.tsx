@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
-import { useSession } from './store';
+import { isCurrentSession, useSession } from './store';
 import { chunkTranscript } from './chunk';
 import { useAutoTitle, useStudyPack, useTranscribe } from './hooks';
 import { useSessionThreads } from './hooks/useSessionThreads';
@@ -35,7 +35,8 @@ export function App() {
   const [recording, setRecording] = useState(false);
   const [tick, setTick] = useState(0);
   const [wordCount, setWordCount] = useState(0);
-  const [busy, setBusy] = useState('');
+  const [busyText, setBusyText] = useState('');
+  const isBusy = busyText !== '';
   const [tab, setTab] = useState<'write' | 'preview'>('write');
   const recorder = useRef<MediaRecorder | null>(null);
   const recognition = useRef<any>(null);
@@ -65,8 +66,8 @@ export function App() {
   async function uploadAudio(file?: File) {
     if (!file) return;
     setError('');
-    setBusy('Transcribing audio…');
-    transcribe.mutate({ blob: file, name: file.name }, { onSettled: () => setBusy('') });
+    setBusyText('Transcribing audio…');
+    transcribe.mutate({ blob: file, name: file.name }, { onSettled: () => setBusyText('') });
   }
 
   async function uploadTranscript(file?: File) {
@@ -87,8 +88,8 @@ export function App() {
     recorder.current.ondataavailable = (e) => e.data.size && chunks.current.push(e.data);
     recorder.current.onstop = () => {
       setRecording(false);
-      setBusy('Transcribing recording…');
-      transcribe.mutate({ blob: new Blob(chunks.current, { type: 'audio/webm' }), name: 'audio.webm' }, { onSettled: () => setBusy('') });
+      setBusyText('Transcribing recording…');
+      transcribe.mutate({ blob: new Blob(chunks.current, { type: 'audio/webm' }), name: 'audio.webm' }, { onSettled: () => setBusyText('') });
     };
     recorder.current.start();
 
@@ -122,22 +123,22 @@ export function App() {
     setNotes('');
     try {
       for (let i = 0; i < parts.length; i++) {
-        if (useSession.getState().sessionId !== targetId) break; // user switched threads
-        setBusy(`Generating study pack, part ${i + 1} of ${parts.length}…`);
+        if (!isCurrentSession(targetId)) break; // user switched threads
+        setBusyText(`Generating study pack, part ${i + 1} of ${parts.length}…`);
         const generated = await study.mutateAsync(parts[i]);
-        if (useSession.getState().sessionId !== targetId) break;
+        if (!isCurrentSession(targetId)) break;
         appendNotes(`## Part ${i + 1}\n\n${generated}`);
       }
     } finally {
-      setBusy('');
+      setBusyText('');
     }
   }
 
-  const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusy);
+  const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusyText);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const drawerSession = drawerId ? sessions.data?.find((s) => s.id === drawerId) : undefined;
 
-  const status = busy || (recording ? 'Listening for audio input…' : 'Ready. Add a lecture to begin.');
+  const status = busyText || (recording ? 'Listening for audio input…' : 'Ready. Add a lecture to begin.');
 
   return (
     <main className="app-shell">
@@ -155,7 +156,7 @@ export function App() {
           <Hero />
           <Toolbar
             recording={recording}
-            busy={Boolean(busy)}
+            busy={isBusy}
             canMake={!!transcript.trim()}
             canSave={!(notes.trim() === '' && transcript.trim() === '')}
             onUploadAudio={uploadAudio}
@@ -165,9 +166,9 @@ export function App() {
             onSave={saveCurrent}
           />
           <ErrorBanner />
-          <StatusLine busy={Boolean(busy)} recording={recording} status={status} />
+          <StatusLine busy={isBusy} recording={recording} status={status} />
           <TranscriptWorkspace recording={recording} tick={tick} wordCount={wordCount} />
-          <StudyPack busy={Boolean(busy)} tab={tab} onTab={setTab} />
+          <StudyPack busy={isBusy} tab={tab} onTab={setTab} />
           <WorkspaceFooter />
         </div>
       </div>

@@ -14,14 +14,12 @@ function BubbleActions({
   role,
   content,
   isRunning,
-  onCopy,
   onRegenerate,
   onDelete
 }: {
   role: string;
   content: string;
   isRunning: boolean;
-  onCopy: () => void;
   onRegenerate: () => void;
   onDelete: () => void;
 }) {
@@ -94,7 +92,6 @@ export function SessionThread({
                       role={message.role}
                       content={text}
                       isRunning={isRunning}
-                      onCopy={() => {}}
                       onRegenerate={onRegenerate}
                       onDelete={() => onDeleteMessage(message.role === 'user' ? 'user' : 'assistant', text)}
                     />

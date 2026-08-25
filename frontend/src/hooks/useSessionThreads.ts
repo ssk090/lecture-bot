@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { createSession, deleteSession, generateSessionTitle, listSessions, saveSession, updateSession, type Session } from '../api';
-import { useSession } from '../store';
+import { isCurrentSession, useSession } from '../store';
 
 export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, setBusy: (text: string) => void) {
   const { sessionId, transcript, notes, setSessionId, setTranscript, setLiveTranscript, setNotes, setError } = useSession();
@@ -47,7 +47,7 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
 
   async function saveCurrent() {
     if (!notes.trim() && !transcript.trim()) return;
-    const targetId = useSession.getState().sessionId; // anchor to the active session
+    const targetId = sessionId; // anchor to the active session
     setBusy('Saving session…');
     try {
       setError('');
@@ -55,7 +55,7 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
       const result = await saveSession(targetId, transcript, notes, title);
       await updateSession(result.id, { title });
       // only claim the new id if the user is still on this thread
-      if (useSession.getState().sessionId === targetId) setSessionId(result.id);
+      if (isCurrentSession(targetId)) setSessionId(result.id);
       await sessions.refetch();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Save failed. Is MongoDB running?');

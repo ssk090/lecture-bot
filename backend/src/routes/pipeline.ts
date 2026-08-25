@@ -1,0 +1,98 @@
+import { Router } from "express";
+import multer from "multer";
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { promisify } from "node:util";
+import {
+  STUDY_TIMEOUT_MS,
+  SYSTEM_PROMPT,
+  TITLE_SYSTEM,
+  askLlm,
+} from "../llm";
+
+const exec = promisify(execFile);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 250 * 1024 * 1024 },
+});
+
+const MAX_TRANSCRIPT_CHARS = 500_000;
+
+const router = Router();
+
+async function transcribe(buffer: Buffer, originalName: string) {
+  const dir = await mkdtemp(path.join(tmpdir(), "lecture-bot-"));
+  const input = path.join(dir, originalName || "audio.webm");
+  const output = path.join(dir, "audio.txt");
+  try {
+    await writeFile(input, buffer);
+    const cmd = process.env.PARAKEET_CMD ?? "parakeet-mlx";
+    const args = (
+      process.env.PARAKEET_ARGS ??
+      "--output-dir {dir} --output-format txt {input}"
+    )
+      .replace("{input}", input)
+      .replace("{output}", output)
+      .replace("{dir}", dir)
+      .split(" ")
+      .filter(Boolean);
+    const { stdout } = await exec(cmd, args, { timeout: 30 * 60 * 1000 });
+    try {
+      return await readFile(output, "utf8");
+    } catch {
+      return stdout;
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+router.post("/transcribe", upload.single("audio"), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "audio file required" });
+  try {
+    res.json({
+      transcript: await transcribe(req.file.buffer, req.file.originalname),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "transcription failed",
+    });
+  }
+});
+
+router.post("/study", async (req, res) => {
+  const transcript = String(req.body?.transcript ?? "").trim();
+  if (!transcript) return res.status(400).json({ error: "transcript required" });
+  if (transcript.length > MAX_TRANSCRIPT_CHARS)
+    return res
+      .status(413)
+      .json({ error: `transcript too long (max ${MAX_TRANSCRIPT_CHARS} chars)` });
+  try {
+    res.json({ notes: await askLlm(transcript, SYSTEM_PROMPT, STUDY_TIMEOUT_MS) });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "notes failed",
+    });
+  }
+});
+
+router.post("/title", async (req, res) => {
+  const text = String(req.body?.text ?? "").trim();
+  if (!text) return res.json({ title: "New session" });
+  try {
+    const title = await askLlm(text.slice(0, 4000), TITLE_SYSTEM, 60_000);
+    res.json({
+      title:
+        title.split("\n")[0].replace(/^['"]|['".]$/g, "").slice(0, 80) ||
+        "New session",
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "title failed",
+    });
+  }
+});
+
+export const pipelineRouter = router;
