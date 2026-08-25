@@ -4,27 +4,21 @@ import {
   type Part,
 } from "@opencode-ai/sdk";
 
-export const SYSTEM_PROMPT = `You are an academic study assistant. Use only the provided transcript unless a term from it needs a brief standard definition. Remove filler and logistics. Preserve lecture context.
+export const STUDY_CHUNK_SYSTEM = `You are an academic study assistant. Create study material for ONLY the transcript portion below.
 
-Return markdown with:
-1. High-Level Summary: 2-3 sentence subject/objective and one key takeaway.
-2. Structured Notes: thematic sections with bullets, definitions, formulas, frameworks, mechanisms, examples.
-3. High-Yield Points: 4-7 testable ideas, pitfalls, exceptions, nuances.
-4. Flashcards: 5-10 Front/Back cards.
-5. Practice Quiz: 4-5 mixed questions, then answer key with brief rationales.`;
+Return markdown with exactly these five section headings, in order:
+1. High-Level Summary: 1-2 sentences capturing this portion's objective.
+2. Structured Notes: bullet facts, definitions, formulas, frameworks, mechanisms, examples.
+3. High-Yield Points: 2-4 testable ideas, pitfalls, exceptions, nuances.
+4. Flashcards: 2-4 Front/Back cards.
+5. Practice Quiz: 2-3 questions, then an answer key with brief rationales.
+
+Be concise. Cover only what is in the transcript. Do not mention parts, chunks, or any other document.`;
 
 export const CHAT_SYSTEM = `You answer questions using ONLY the selected session context below. Do not use other sessions, your memory, or outside facts. If the answer is not in the context, say: I could not find that in this session.`;
 
 export const TITLE_SYSTEM =
   "Name this study session in 3-7 words. Return only the title, no quotes or punctuation at the end.";
-
-export const STUDY_CONTINUE_SYSTEM = `You are continuing an existing study pack for the same lecture. Append the remaining material to the SAME document.
-
-Strict rules:
-- Do NOT re-emit the top-level headings (High-Level Summary, Structured Notes, High-Yield Points, Flashcards, Practice Quiz). They already exist in the document from the first part.
-- Do NOT add any part, segment, or section markers such as \"Part 1\" or \"Section 2\".
-- Continue in-progress sections and add new bullets, definitions, formulas, flashcards, and quiz items that extend the existing structure, using the transcript below.
-- Output plain, appended study-pack content only.`;
 
 export const STUDY_TIMEOUT_MS = 10 * 60 * 1000;
 export const CHAT_TIMEOUT_MS = 150 * 1000;
@@ -69,6 +63,7 @@ export async function* streamLlm(
   prompt: string,
   system: string,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): AsyncGenerator<string, void, void> {
   if (process.env.FAKE_LLM === "1") {
     yield fakeAnswer(prompt);
@@ -80,7 +75,21 @@ export async function* streamLlm(
   if (!session.data) throw new Error("opencode session creation failed");
   const sessionID = session.data.id;
 
-  const events = await client.event.subscribe({});
+  // A closed client connection aborts the signal, which cancels the SSE
+  // subscription and stops the opencode session so the loop ends promptly
+  // instead of burning the timeout.
+  const events = await client.event.subscribe(signal ? { signal } : {});
+  const abort = () => {
+    client.session.abort({ path: { id: sessionID } }).catch(() => {});
+  };
+  if (signal) {
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  }
+
   await client.session.promptAsync({
     path: { id: sessionID },
     body: {
@@ -91,28 +100,33 @@ export async function* streamLlm(
   });
 
   const deadline = Date.now() + timeoutMs;
-  for await (const event of events.stream) {
-    if (Date.now() > deadline)
-      throw new Error(`LLM timed out after ${Math.round(timeoutMs / 1000)}s`);
-    const e = event as { type?: string; properties?: Record<string, unknown> };
-    if (e.type === "message.part.updated") {
-      const props = e.properties as {
-        part?: Part & { sessionID?: string; text?: string };
-        delta?: string;
-      };
-      const part = props.part;
-      if (part?.type === "text" && part.sessionID === sessionID) {
-        const chunk = props.delta ?? part.text ?? "";
-        if (chunk) yield chunk;
+  try {
+    for await (const event of events.stream) {
+      if (signal?.aborted) break;
+      if (Date.now() > deadline)
+        throw new Error(`LLM timed out after ${Math.round(timeoutMs / 1000)}s`);
+      const e = event as { type?: string; properties?: Record<string, unknown> };
+      if (e.type === "message.part.updated") {
+        const props = e.properties as {
+          part?: Part & { sessionID?: string; text?: string };
+          delta?: string;
+        };
+        const part = props.part;
+        if (part?.type === "text" && part.sessionID === sessionID) {
+          const chunk = props.delta ?? part.text ?? "";
+          if (chunk) yield chunk;
+        }
+      } else if (e.type === "session.idle") {
+        const props = e.properties as { sessionID?: string };
+        if (props.sessionID === sessionID) return;
+      } else if (e.type === "session.error") {
+        const props = e.properties as { sessionID?: string; error?: string };
+        if (props.sessionID === sessionID)
+          throw new Error(props.error ?? "LLM session failed");
       }
-    } else if (e.type === "session.idle") {
-      const props = e.properties as { sessionID?: string };
-      if (props.sessionID === sessionID) return;
-    } else if (e.type === "session.error") {
-      const props = e.properties as { sessionID?: string; error?: string };
-      if (props.sessionID === sessionID)
-        throw new Error(props.error ?? "LLM session failed");
     }
+  } finally {
+    if (signal) signal.removeEventListener("abort", abort);
   }
 }
 
@@ -201,8 +215,17 @@ export function mergeContinuation(base: string, addition: string): string {
   }
   if (cur) blocks.push(cur);
 
+  // Map each section heading to the line its content ends at (the next
+  // heading, or the document end), so new content is APPENDED at the end of
+  // the section instead of right under the heading.
+  const sectionEnds = new Map<number, number>();
+  for (let h = 0; h < headings.length; h++) {
+    const next = headings[h + 1]?.index ?? baseLines.length;
+    sectionEnds.set(headings[h].index, next);
+  }
+
   // Route each titled block into the best-matching base section.
-  const insertions = new Map<number, string[]>();
+  const insertions = new Map<number, string[]>(); // keyed by insert-before line
   const leftovers: string[] = [];
   for (const block of blocks) {
     if (!block.lines.some((l) => l.trim())) continue;
@@ -215,8 +238,9 @@ export function mergeContinuation(base: string, addition: string): string {
       headings.find((h) => h.key === key) ??
       headings.find((h) => h.key.includes(key) || key.includes(h.key));
     if (best) {
-      const arr = insertions.get(best.index) ?? [];
-      insertions.set(best.index, [...arr, ...block.lines]);
+      const before = sectionEnds.get(best.index) ?? baseLines.length;
+      const arr = insertions.get(before) ?? [];
+      insertions.set(before, [...arr, ...block.lines]);
     } else {
       leftovers.push('', block.original, ...block.lines);
     }
@@ -224,10 +248,12 @@ export function mergeContinuation(base: string, addition: string): string {
 
   const out: string[] = [];
   for (let i = 0; i < baseLines.length; i++) {
-    out.push(baseLines[i]);
     const inserted = insertions.get(i);
     if (inserted) out.push(...inserted);
+    out.push(baseLines[i]);
   }
+  const tail = insertions.get(baseLines.length);
+  if (tail) out.push(...tail);
   if (leftovers.length) out.push(...leftovers);
   return out.join('\n').replace(/\n{3,}/g, '\n\n');
 }
@@ -238,26 +264,29 @@ export type StudyStreamEvent =
   | { kind: 'merged'; document: string };
 
 /**
- * Streaming variant: processes the transcript in small chunks but emits a
- * single merged document. The first chunk's tokens stream live; each later
- * chunk's output is merged into the existing sections and a clean merged
- * snapshot is emitted so the preview stays sectioned (no "More X").
+ * Streaming variant: processes the transcript chunk by chunk. Each chunk is
+ * generated independently (its own five sections) and its output is appended
+ * into the matching sections of the running document; a clean merged snapshot
+ * is emitted after each chunk so the preview stays sectioned (no "More X").
  */
 export async function* generateStudyDocStream(
   transcript: string,
   timeoutMs = STUDY_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): AsyncGenerator<StudyStreamEvent, void, void> {
   const parts = chunkTranscript(transcript);
   if (!parts.length) return;
   let doc = '';
   for (let i = 0; i < parts.length; i++) {
+    if (signal?.aborted) break;
     yield { kind: 'progress', index: i + 1, total: parts.length };
-    const system = i === 0 ? SYSTEM_PROMPT : STUDY_CONTINUE_SYSTEM;
     let raw = '';
-    for await (const chunk of streamLlm(parts[i], system, timeoutMs)) {
+    for await (const chunk of streamLlm(parts[i], STUDY_CHUNK_SYSTEM, timeoutMs, signal)) {
       raw += chunk;
-      yield { kind: 'delta', text: chunk };
+      if (chunk.trim()) yield { kind: 'delta', text: chunk };
     }
+    // Every chunk independently lists the five sections; fold each one into
+    // its matching section of the running document (true per-section append).
     doc = i === 0 ? raw.trim() : mergeContinuation(doc, raw).trim();
     yield { kind: 'merged', document: doc };
   }

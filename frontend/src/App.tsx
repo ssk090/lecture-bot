@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { isCurrentSession, useSession } from './store';
-import { streamStudyPack } from './api';
+import { isAbortError, streamStudyPack } from './api';
 import { useAutoTitle, useTranscribe } from './hooks';
 import { useSessionThreads } from './hooks/useSessionThreads';
 import { AppHeader } from './components/AppHeader';
@@ -17,17 +17,8 @@ import { WorkspaceFooter } from './components/WorkspaceFooter';
 const ChatDrawer = lazy(() => import('./components/assistant-ui/ChatDrawer'));
 
 export function App() {
-  const {
-    transcript,
-    notes,
-    sessionId,
-    liveTranscript,
-    setTranscript,
-    setNotes,
-    setLiveTranscript,
-    appendTranscript,
-    setError,
-  } = useSession();
+  const { transcript, notes, sessionId, liveTranscript, setTranscript, setNotes, setLiveTranscript, appendTranscript, setError } =
+    useSession();
   const transcribe = useTranscribe();
   const autoTitle = useAutoTitle();
   const [recording, setRecording] = useState(false);
@@ -87,7 +78,10 @@ export function App() {
     recorder.current.onstop = () => {
       setRecording(false);
       setBusyText('Transcribing recording…');
-      transcribe.mutate({ blob: new Blob(chunks.current, { type: 'audio/webm' }), name: 'audio.webm' }, { onSettled: () => setBusyText('') });
+      transcribe.mutate(
+        { blob: new Blob(chunks.current, { type: 'audio/webm' }), name: 'audio.webm' },
+        { onSettled: () => setBusyText('') }
+      );
     };
     recorder.current.start();
 
@@ -114,45 +108,69 @@ export function App() {
 
   async function runStudy() {
     if (!transcript.trim()) return;
-    const targetId = sessionId; // anchor to the active session
+    let anchor = sessionId; // follows the active session; adopts the id autosave lazily creates
     setError('');
     setNotes('');
     setBusyText('Generating study pack…');
     let accumulated = '';
+    const controller = new AbortController();
+    const onPageHide = () => controller.abort();
+    window.addEventListener('pagehide', onPageHide);
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const applyIfCurrent = (text: string) => {
-      if (isCurrentSession(targetId)) setNotes(text);
+      if (isCurrentSession(anchor)) setNotes(text);
+    };
+    // checkpoint the partial pack ~1.5s after the last delta, and immediately at each merged boundary
+    const flushNow = async () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      if (!isCurrentSession(anchor)) return;
+      const id = await autosaveCurrent({ notes: accumulated });
+      if (id && isCurrentSession(id)) anchor = id; // adopt the lazily-created id
+    };
+    const scheduleFlush = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flushNow, 1500);
     };
     try {
-      await streamStudyPack(transcript, {
-        onProgress: (index, total) => {
-          if (isCurrentSession(targetId)) {
-            setBusyText(
-              total > 1
-                ? `Generating study pack… part ${index} of ${total}`
-                : 'Generating study pack…'
-            );
+      await streamStudyPack(
+        transcript,
+        {
+          onProgress: (index, total) => {
+            if (isCurrentSession(anchor)) {
+              setBusyText(total > 1 ? `Generating study pack… part ${index} of ${total}` : 'Generating study pack…');
+            }
+          },
+          onDelta: (text) => {
+            accumulated += text;
+            applyIfCurrent(accumulated);
+            scheduleFlush();
+          },
+          onMerged: (document) => {
+            accumulated = document;
+            applyIfCurrent(document);
+            flushNow();
           }
         },
-        onDelta: (text) => {
-          accumulated += text;
-          applyIfCurrent(accumulated);
-        },
-        onMerged: (document) => {
-          accumulated = document;
-          applyIfCurrent(document);
-        },
-      });
+        controller.signal
+      );
       applyIfCurrent(accumulated);
+      flushNow();
     } catch (error) {
-      if (isCurrentSession(targetId)) {
+      if (isAbortError(error)) return; // refresh/close: nothing wrong, no banner
+      if (isCurrentSession(anchor)) {
         setError(`${error instanceof Error ? error.message : 'Study pack failed'}. Check OpenCode and try again.`);
       }
     } finally {
-      if (isCurrentSession(targetId)) setBusyText('');
+      window.removeEventListener('pagehide', onPageHide);
+      if (timer) clearTimeout(timer);
+      if (isCurrentSession(anchor)) setBusyText('');
     }
   }
 
-  const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusyText);
+  const { sessions, newSession, openSession, removeSession, saveCurrent, autosaveCurrent } = useSessionThreads(setTab, setBusyText);
   const [drawerId, setDrawerId] = useState<string | null>(null);
   const drawerSession = drawerId ? sessions.data?.find((s) => s.id === drawerId) : undefined;
 
@@ -192,11 +210,7 @@ export function App() {
       </div>
       {drawerId && (
         <Suspense fallback={null}>
-          <ChatDrawer
-            sessionId={drawerId}
-            title={drawerSession?.title}
-            onClose={() => setDrawerId(null)}
-          />
+          <ChatDrawer sessionId={drawerId} title={drawerSession?.title} onClose={() => setDrawerId(null)} />
         </Suspense>
       )}
     </main>

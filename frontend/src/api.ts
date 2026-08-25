@@ -7,6 +7,11 @@ export async function readError(res: Response, body: unknown) {
   throw new Error(parsed.success && parsed.data.error ? parsed.data.error : `${res.status} request failed`);
 }
 
+/** True when a fetch was aborted (refresh, unmount, pagehide), not a real failure. */
+export function isAbortError(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && (e as { name?: string }).name === 'AbortError';
+}
+
 const transcribeResponse = z.object({ transcript: z.string() });
 const titleResponse = z.object({ title: z.string() });
 const chatMessageSchema = z.object({
@@ -44,12 +49,14 @@ export async function streamStudyPack(
     onDelta?: (delta: string) => void;
     onMerged?: (document: string) => void;
     onProgress?: (index: number, total: number) => void;
-  } = {}
+  } = {},
+  signal?: AbortSignal
 ): Promise<void> {
   const res = await fetch('/api/study/stream', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ transcript })
+    body: JSON.stringify({ transcript }),
+    signal
   });
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);
@@ -152,12 +159,14 @@ export async function streamChat(
   id: string,
   question: string,
   onDelta: (delta: string) => void,
-  mode: 'ask' | 'regenerate' = 'ask'
+  mode: 'ask' | 'regenerate' = 'ask',
+  signal?: AbortSignal
 ): Promise<ChatMessage[]> {
   const res = await fetch(`/api/sessions/${id}/chat/stream`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ question, mode })
+    body: JSON.stringify({ question, mode }),
+    signal
   });
   if (!res.ok || !res.body) {
     const body = await res.json().catch(() => null);

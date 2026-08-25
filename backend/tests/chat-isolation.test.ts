@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import type { Server } from "node:http";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
+import { sessions } from "../src/db";
+import { streamChatAnswer } from "../src/routes/chat";
 
 let server: Server | undefined;
 let base = "";
@@ -61,6 +63,27 @@ async function ask(id: string, question: string): Promise<{ answer: string }> {
   return (await res.json()) as { answer: string };
 }
 
+// A Response that reports a closed socket and fires `close` immediately,
+// simulating a client that disconnected before the stream finished.
+function closingResponse() {
+  const res: any = {
+    destroyed: true,
+    writableEnded: false,
+    writeHead: () => {},
+    write: () => {
+      throw new Error("write called on a closed socket");
+    },
+    end: () => {
+      throw new Error("end called on a closed socket");
+    },
+    on: (event: string, cb: () => void) => {
+      if (event === "close") cb();
+      return res;
+    },
+  };
+  return res;
+}
+
 describe("session-scoped chat", () => {
   it("builds each answer from the selected session's context only", async () => {
     const idA = await createSession("Biology lecture covering ALPHA-ONLY mitochondria.");
@@ -95,5 +118,17 @@ describe("session-scoped chat", () => {
     expect(b.chat.map((m: { content: string }) => m.content)).toContain(
       "Question two?",
     );
+  });
+
+  it("does not persist a chat turn when the client disconnected early", async () => {
+    const id = await createSession("Content ALPHA-ONLY.");
+    const col = await sessions();
+    const doc = await col.findOne({ _id: new ObjectId(id) });
+    expect(doc).toBeTruthy();
+
+    await streamChatAnswer(doc, "Question?", closingResponse(), true);
+
+    const after = await col.findOne({ _id: doc!._id });
+    expect(after?.chat ?? []).toEqual([]);
   });
 });

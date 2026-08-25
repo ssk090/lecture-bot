@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import {
-  useExternalStoreRuntime,
-  type AppendMessage,
-  type ThreadMessageLike,
-} from '@assistant-ui/react';
-import { getSession, streamChat, updateSession, type ChatMessage } from '../api';
+import { useExternalStoreRuntime, type AppendMessage, type ThreadMessageLike } from '@assistant-ui/react';
+import { getSession, isAbortError, streamChat, updateSession, type ChatMessage } from '../api';
 
 function toThreadMessage(message: ChatMessage): ThreadMessageLike {
   return { role: message.role, content: [{ type: 'text', text: message.content }] };
@@ -20,11 +16,7 @@ function sanitizeChat(chat: ChatMessage[]): ChatMessage[] {
   const out: ChatMessage[] = [];
   for (const message of chat) {
     const last = out[out.length - 1];
-    if (
-      message.role === 'user' &&
-      last?.role === 'user' &&
-      last.content === message.content
-    ) {
+    if (message.role === 'user' && last?.role === 'user' && last.content === message.content) {
       continue;
     }
     out.push(message);
@@ -44,12 +36,19 @@ async function streamWithReveal(opts: {
   mode: 'ask' | 'regenerate';
   before: ChatMessage[];
   set: (next: (current: ChatMessage[]) => ChatMessage[]) => void;
+  signal?: AbortSignal;
 }): Promise<ChatMessage[]> {
   let shown = '';
   let pending = '';
   let finished = false;
   let final: ChatMessage[] = [];
   const paint = () => opts.set(() => [...opts.before, { role: 'assistant', content: shown }]);
+  // Persist the partial answer as it reveals, so a reload keeps it. The
+  // server's canonical write lands after stream end and stays authoritative.
+  const checkpoint = setInterval(() => {
+    if (!shown) return;
+    updateSession(opts.id, { chat: [...opts.before, { role: 'assistant', content: shown }] }).catch(() => {});
+  }, 2000);
   const ticker = setInterval(() => {
     if (pending) {
       const step = Math.max(1, Math.ceil(pending.length / 48));
@@ -63,17 +62,24 @@ async function streamWithReveal(opts: {
     }
   }, 16);
   try {
-    final = await streamChat(opts.id, opts.question, (delta) => {
-      pending += delta;
-    }, opts.mode);
-    const full =
-      [...final].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+    final = await streamChat(
+      opts.id,
+      opts.question,
+      (delta) => {
+        pending += delta;
+      },
+      opts.mode,
+      opts.signal
+    );
+    const full = [...final].reverse().find((m) => m.role === 'assistant')?.content ?? '';
     // Reveal only what is still missing from the answer. (Deltas already put
     // the text in `pending`, so appending here would double it.)
     pending = full.slice(shown.length);
     finished = true;
+    clearInterval(checkpoint);
   } catch (error) {
     clearInterval(ticker);
+    clearInterval(checkpoint);
     throw error;
   }
   return final;
@@ -91,6 +97,7 @@ export function useDrawerChat(sessionId: string) {
   const [isRunning, setIsRunning] = useState(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  const controllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -111,6 +118,7 @@ export function useDrawerChat(sessionId: string) {
       });
     return () => {
       cancelled = true;
+      controllerRef.current?.abort(); // drawer closed or session switched
     };
   }, [sessionId]);
 
@@ -132,6 +140,8 @@ export function useDrawerChat(sessionId: string) {
     }
     setIsRunning(true);
     setError('');
+    const controller = new AbortController();
+    controllerRef.current = controller;
     try {
       const final = await streamWithReveal({
         id: sessionId,
@@ -139,12 +149,17 @@ export function useDrawerChat(sessionId: string) {
         mode,
         before,
         set: setMessages,
+        signal: controller.signal
       });
       setMessages(sanitizeChat(final));
     } catch (err) {
-      setMessages(before);
-      setError(err instanceof Error ? err.message : 'Chat failed.');
+      // on abort keep the partial the checkpoint already persisted
+      if (!isAbortError(err)) {
+        setMessages(before);
+        setError(err instanceof Error ? err.message : 'Chat failed.');
+      }
     } finally {
+      controllerRef.current = null;
       setIsRunning(false);
     }
   }
@@ -158,9 +173,7 @@ export function useDrawerChat(sessionId: string) {
   async function deleteMessage(role: 'user' | 'assistant', content: string) {
     if (isRunning) return;
     const current = messagesRef.current;
-    const index = [...current].reverse().findIndex(
-      (m) => m.role === role && m.content === content,
-    );
+    const index = [...current].reverse().findIndex((m) => m.role === role && m.content === content);
     if (index === -1) return;
     const next = current.filter((_, i) => i !== current.length - 1 - index);
     setMessages(next);
@@ -178,11 +191,10 @@ export function useDrawerChat(sessionId: string) {
     messages,
     convertMessage: toThreadMessage,
     onNew: async (message: AppendMessage) => {
-      const text =
-        message.content[0]?.type === 'text' ? message.content[0].text : '';
+      const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
       if (!text.trim()) return;
       await generate(text, 'ask');
-    },
+    }
   });
 
   return { runtime, regenerate, deleteMessage, isRunning, error, loaded, hasContext, clearChat };

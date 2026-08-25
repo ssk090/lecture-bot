@@ -12,7 +12,7 @@ const router = Router();
 
 /** Shared SSE plumbing for chat answers. appendUser controls whether a new
  *  user turn is added (ask) or the existing last user turn is reused (regenerate). */
-async function streamChatAnswer(
+export async function streamChatAnswer(
   doc: any,
   question: string,
   res: Response,
@@ -23,12 +23,21 @@ async function streamChatAnswer(
     "cache-control": "no-cache",
     connection: "keep-alive",
   });
+  const controller = new AbortController();
+  res.on("close", () => controller.abort());
+  const write = (data: string) => {
+    if (res.destroyed || res.writableEnded) return;
+    res.write(data);
+  };
+  const end = () => {
+    if (!res.destroyed && !res.writableEnded) res.end();
+  };
   const context = buildChatContext(doc);
   if (!context) {
-    res.write(
+    write(
       `data: ${JSON.stringify({ error: "selected session has no transcript or notes" })}\n\n`,
     );
-    res.end();
+    end();
     return;
   }
   let full = "";
@@ -37,10 +46,14 @@ async function streamChatAnswer(
       `${context}\n\nQuestion:\n${question}`,
       CHAT_SYSTEM,
       CHAT_TIMEOUT_MS,
+      controller.signal,
     )) {
       full += chunk;
-      res.write(`data: ${JSON.stringify({ delta: chunk })}\n\n`);
+      write(`data: ${JSON.stringify({ delta: chunk })}\n\n`);
     }
+    // A disconnected client aborts mid-stream: leave the partial answer to
+    // the client's own checkpoint, don't persist it here.
+    if (controller.signal.aborted) return;
     if (!full.trim()) throw new Error("no answer generated");
     const next = appendUser
       ? [
@@ -52,13 +65,13 @@ async function streamChatAnswer(
       ...next,
       { role: "assistant", content: full, createdAt: new Date() },
     ]);
-    res.write(`data: ${JSON.stringify({ done: true, chat })}\n\n`);
-    res.end();
+    write(`data: ${JSON.stringify({ done: true, chat })}\n\n`);
+    end();
   } catch (error) {
-    res.write(
+    write(
       `data: ${JSON.stringify({ error: error instanceof Error ? error.message : "chat failed" })}\n\n`,
     );
-    res.end();
+    end();
   }
 }
 

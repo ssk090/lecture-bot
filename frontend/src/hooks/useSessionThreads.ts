@@ -1,5 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
-import { createSession, deleteSession, generateSessionTitle, getSession, listSessions, saveSession, updateSession, type Session } from '../api';
+import {
+  createSession,
+  deleteSession,
+  generateSessionTitle,
+  getSession,
+  listSessions,
+  saveSession,
+  updateSession,
+  type Session
+} from '../api';
 import { isCurrentSession, useSession } from '../store';
 
 export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, setBusy: (text: string) => void) {
@@ -15,7 +24,6 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
     setTab('write');
   }
 
-
   /** Persist the current session's unsaved transcript/notes before leaving it. */
   async function flushCurrent() {
     const current = useSession.getState();
@@ -23,6 +31,26 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
     const { transcript, notes } = current;
     if (!transcript.trim() && !notes.trim()) return;
     await updateSession(current.sessionId, { transcript, notes }).catch(() => {});
+  }
+
+  /**
+   * Checkpoint the active session as the user works. Lazily creates the
+   * session on the first save (boot starts with sessionId null), then writes
+   * only the fields that changed. Anchored with `isCurrentSession` so a
+   * mid-flight thread switch never writes to the wrong session.
+   */
+  async function autosaveCurrent(partial: { notes?: string; transcript?: string }): Promise<string | null> {
+    const state = useSession.getState();
+    let id = state.sessionId;
+    if (!id) {
+      id = await createSession(partial.transcript ?? state.transcript, partial.notes ?? state.notes);
+      // claim the id only if the workspace is still unsaved (no race with newSession/openSession)
+      if (useSession.getState().sessionId !== null) return null;
+      setSessionId(id);
+    }
+    if (!isCurrentSession(id)) return null;
+    await updateSession(id, partial).catch(() => {});
+    return id;
   }
 
   async function newSession() {
@@ -78,5 +106,5 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
     }
   }
 
-  return { sessions, newSession, openSession, removeSession, saveCurrent };
+  return { sessions, newSession, openSession, removeSession, saveCurrent, autosaveCurrent };
 }
