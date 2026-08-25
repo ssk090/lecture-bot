@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
+import { AssistantRuntimeProvider } from '@assistant-ui/react';
 import { Download, FileText, Loader2, Mic, Save, Square, Upload, WandSparkles, X } from 'lucide-react';
 import { marked } from 'marked';
 import { useSession } from './store';
 import { chunkTranscript } from './chunk';
+import { useSessionChatRuntime } from './hooks/useSessionChatRuntime';
 import { useStudyPack, useTranscribe } from './hooks';
 import { useSessionThreads } from './hooks/useSessionThreads';
+import { SessionThread } from './components/assistant-ui/SessionThread';
 import { GenerationLoader } from './components/GenerationLoader';
 import { Panel } from './components/Panel';
 import { StreamingText } from './components/StreamingText';
@@ -136,6 +139,7 @@ export function App() {
   }
 
   const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusy);
+  const chatRuntime = useSessionChatRuntime();
 
   const status = busy || (recording ? 'Listening for audio input…' : 'Ready. Add a lecture to begin.');
 
@@ -283,6 +287,12 @@ export function App() {
             ) : (
               <div className="markdown-preview">Nothing to preview yet.</div>
             )}
+          </Panel>
+
+          <Panel label="session chat" hint="answers only from this session" className="chat-panel">
+            <AssistantRuntimeProvider runtime={chatRuntime}>
+              <SessionThread />
+            </AssistantRuntimeProvider>
           </Panel>
 
           <footer>

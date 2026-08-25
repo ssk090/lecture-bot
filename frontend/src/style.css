@@ -558,6 +558,80 @@ textarea {
   font-family: var(--font-mono);
   font-size: 11px;
 }
+.chat-panel .panel-content {
+  padding: 0;
+}
+.chat-messages {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  min-height: 180px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.chat-welcome {
+  color: #52525b;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin: 6px 0;
+}
+.chat-bubble {
+  max-width: 84%;
+  padding: 10px 12px;
+  border-radius: 2px;
+  overflow-wrap: anywhere;
+}
+.chat-bubble.user {
+  justify-self: end;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+.chat-bubble.assistant {
+  justify-self: start;
+  background: #151518;
+  border: 1px solid var(--border);
+}
+.chat-body {
+  color: inherit;
+  line-height: 1.6;
+  font-size: 12px;
+}
+.chat-body p {
+  margin: 0 0 8px;
+}
+.chat-body p:last-child {
+  margin-bottom: 0;
+}
+.chat-body pre {
+  background: #080809;
+  border: 1px solid var(--border);
+  padding: 10px;
+  overflow-x: auto;
+  font-size: 11px;
+}
+.chat-bubble.assistant .chat-body {
+  color: #d4d4d8;
+}
+.chat-composer {
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  padding: 12px;
+}
+.chat-composer textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 40px;
+  max-height: 140px;
+  background: #111114;
+  border: 1px solid #3f3f46;
+  color: #e4e4e7;
+  padding: 9px 11px;
+  font: inherit;
+}
+.spin {
+  animation: spin 1s linear infinite;
+}
 footer {
   justify-content: space-between;
   font-size: 10px;

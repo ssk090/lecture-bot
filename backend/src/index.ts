@@ -169,6 +169,7 @@ function publicSession(doc: any) {
     title: doc.title,
     transcript: doc.transcript,
     notes: doc.notes ?? "",
+    chat: doc.chat ?? [],
     studyPackPath: doc.studyPackPath ?? null,
     createdAt: doc.createdAt,
     updatedAt: doc.updatedAt,
@@ -213,6 +214,7 @@ app.post("/api/sessions", async (req, res) => {
       title,
       transcript,
       notes: String(req.body?.notes ?? ""),
+      chat: [],
       createdAt: now,
       updatedAt: now,
     });
@@ -232,6 +234,7 @@ app.patch("/api/sessions/:id", async (req, res) => {
     update.transcript = String(req.body.transcript);
   if (req.body?.notes !== undefined) update.notes = String(req.body.notes);
   if (req.body?.title !== undefined) update.title = String(req.body.title);
+  if (req.body?.chat !== undefined) update.chat = req.body.chat;
   try {
     const result = await (await sessionsCol()).findOneAndUpdate(
       { _id: id },
@@ -243,6 +246,40 @@ app.patch("/api/sessions/:id", async (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : "failed to update session",
+    });
+  }
+});
+
+app.post("/api/sessions/:id/chat", async (req, res) => {
+  const id = toId(req.params.id);
+  if (!id) return res.status(400).json({ error: "invalid session id" });
+  const question = String(req.body?.question ?? "").trim();
+  if (!question) return res.status(400).json({ error: "question required" });
+
+  try {
+    const col = await sessionsCol();
+    const doc = await col.findOne({ _id: id });
+    if (!doc) return res.status(404).json({ error: "session not found" });
+
+    const context = [`Transcript:\n${doc.transcript ?? ""}`, `Study pack:\n${doc.notes ?? ""}`]
+      .join("\n\n")
+      .trim();
+    if (!context) return res.status(400).json({ error: "selected session has no transcript or notes" });
+
+    const answer = await askOpencode(
+      `Selected session context:\n${context}\n\nQuestion:\n${question}`,
+      "You answer questions only from the selected session context. Do not use other sessions, memory, or outside facts. If the answer is not in the context, say: I could not find that in this session.",
+    );
+    const messages = [
+      ...(doc.chat ?? []),
+      { role: "user", content: question, createdAt: new Date() },
+      { role: "assistant", content: answer, createdAt: new Date() },
+    ];
+    await col.updateOne({ _id: id }, { $set: { chat: messages, updatedAt: new Date() } });
+    res.json({ answer, chat: messages });
+  } catch (error) {
+    res.status(500).json({
+      error: error instanceof Error ? error.message : "chat failed",
     });
   }
 });

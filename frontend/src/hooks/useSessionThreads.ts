@@ -3,7 +3,7 @@ import { createSession, deleteSession, generateSessionTitle, listSessions, saveS
 import { useSession } from '../store';
 
 export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, setBusy: (text: string) => void) {
-  const { sessionId, transcript, notes, setSessionId, setTranscript, setLiveTranscript, setNotes, setError } = useSession();
+  const { sessionId, transcript, notes, setSessionId, setTranscript, setLiveTranscript, setNotes, setChat, setError } = useSession();
   const sessions = useQuery({ queryKey: ['sessions'], queryFn: listSessions });
 
   function clearSession() {
@@ -11,9 +11,11 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
     setTranscript('');
     setLiveTranscript('');
     setNotes('');
+    setChat([]);
     setError('');
     setTab('write');
   }
+
 
   async function newSession() {
     setBusy('Creating session…');
@@ -34,6 +36,7 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
     setTranscript(session.transcript);
     setLiveTranscript('');
     setNotes(session.notes);
+    setChat(session.chat ?? []);
     setError('');
     setTab('write');
   }

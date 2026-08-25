@@ -8,6 +8,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.15.16",
     "@tailwindcss/vite": "latest",
     "@tanstack/react-query": "latest",
     "@vitejs/plugin-react": "latest",

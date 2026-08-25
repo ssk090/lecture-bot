@@ -10,6 +10,11 @@ export async function readError(res: Response, body: unknown) {
 const transcribeResponse = z.object({ transcript: z.string() });
 const studyResponse = z.object({ notes: z.string() });
 const titleResponse = z.object({ title: z.string() });
+const chatMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+  createdAt: z.string().or(z.date()).optional()
+});
 
 export async function transcribeAudio(blob: Blob, name: string) {
   const body = new FormData();
@@ -47,10 +52,12 @@ const sessionSchema = z.object({
   title: z.string(),
   transcript: z.string(),
   notes: z.string().optional().default(''),
+  chat: z.array(chatMessageSchema).optional().default([]),
   createdAt: z.string().optional(),
   updatedAt: z.string().optional()
 });
 
+export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export type Session = z.infer<typeof sessionSchema>;
 
 export async function listSessions() {
@@ -71,7 +78,7 @@ export async function createSession(transcript = '', notes = '', title?: string)
   return z.object({ id: z.string() }).parse(json).id;
 }
 
-export async function updateSession(id: string, body: { transcript?: string; notes?: string; title?: string }) {
+export async function updateSession(id: string, body: { transcript?: string; notes?: string; title?: string; chat?: ChatMessage[] }) {
   const res = await fetch(`/api/sessions/${id}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json' },
@@ -97,4 +104,15 @@ export async function deleteSession(id: string) {
   const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
   const json = await res.json();
   if (!res.ok) await readError(res, json);
+}
+
+export async function askSession(id: string, question: string) {
+  const res = await fetch(`/api/sessions/${id}/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ question })
+  });
+  const json = await res.json();
+  if (!res.ok) await readError(res, json);
+  return z.object({ answer: z.string(), chat: z.array(chatMessageSchema) }).parse(json);
 }
