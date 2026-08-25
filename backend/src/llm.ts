@@ -256,7 +256,7 @@ export async function* generateStudyDocStream(
     let raw = '';
     for await (const chunk of streamLlm(parts[i], system, timeoutMs)) {
       raw += chunk;
-      if (i === 0) yield { kind: 'delta', text: chunk };
+      yield { kind: 'delta', text: chunk };
     }
     doc = i === 0 ? raw.trim() : mergeContinuation(doc, raw).trim();
     yield { kind: 'merged', document: doc };
