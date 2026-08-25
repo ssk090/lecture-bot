@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { createSession, deleteSession, generateSessionTitle, listSessions, saveSession, updateSession, type Session } from '../api';
+import { createSession, deleteSession, generateSessionTitle, getSession, listSessions, saveSession, updateSession, type Session } from '../api';
 import { isCurrentSession, useSession } from '../store';
 
 export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, setBusy: (text: string) => void) {
@@ -16,9 +16,19 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
   }
 
 
+  /** Persist the current session's unsaved transcript/notes before leaving it. */
+  async function flushCurrent() {
+    const current = useSession.getState();
+    if (!current.sessionId) return;
+    const { transcript, notes } = current;
+    if (!transcript.trim() && !notes.trim()) return;
+    await updateSession(current.sessionId, { transcript, notes }).catch(() => {});
+  }
+
   async function newSession() {
     setBusy('Creating session…');
     try {
+      await flushCurrent();
       const id = await createSession('', '', 'New session');
       clearSession();
       setSessionId(id);
@@ -30,13 +40,17 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
     }
   }
 
-  function openSession(session: Session) {
-    setSessionId(session.id);
-    setTranscript(session.transcript);
+  async function openSession(session: Session) {
+    await flushCurrent(); // keep this session's edits before switching
+    // load fresh data so the just-flushed transcript/notes are reflected
+    const latest = await getSession(session.id).catch(() => session);
+    setSessionId(latest.id);
+    setTranscript(latest.transcript);
     setLiveTranscript('');
-    setNotes(session.notes);
+    setNotes(latest.notes);
     setError('');
     setTab('write');
+    await sessions.refetch();
   }
 
   async function removeSession(id: string) {

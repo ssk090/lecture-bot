@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { isCurrentSession, useSession } from './store';
-import { chunkTranscript } from './chunk';
-import { useAutoTitle, useStudyPack, useTranscribe } from './hooks';
+import { streamStudyPack } from './api';
+import { useAutoTitle, useTranscribe } from './hooks';
 import { useSessionThreads } from './hooks/useSessionThreads';
 import { AppHeader } from './components/AppHeader';
 import { ErrorBanner } from './components/ErrorBanner';
@@ -25,13 +25,11 @@ export function App() {
     setTranscript,
     setNotes,
     setLiveTranscript,
-    appendNotes,
     appendTranscript,
     setError,
   } = useSession();
   const transcribe = useTranscribe();
   const autoTitle = useAutoTitle();
-  const study = useStudyPack();
   const [recording, setRecording] = useState(false);
   const [tick, setTick] = useState(0);
   const [wordCount, setWordCount] = useState(0);
@@ -115,22 +113,42 @@ export function App() {
   }
 
   async function runStudy() {
-    const parts = chunkTranscript(transcript);
-    if (!parts.length) return;
+    if (!transcript.trim()) return;
     const targetId = sessionId; // anchor to the active session
     setError('');
-    setTab('write');
     setNotes('');
+    setBusyText('Generating study pack…');
+    let accumulated = '';
+    const applyIfCurrent = (text: string) => {
+      if (isCurrentSession(targetId)) setNotes(text);
+    };
     try {
-      for (let i = 0; i < parts.length; i++) {
-        if (!isCurrentSession(targetId)) break; // user switched threads
-        setBusyText(`Generating study pack, part ${i + 1} of ${parts.length}…`);
-        const generated = await study.mutateAsync(parts[i]);
-        if (!isCurrentSession(targetId)) break;
-        appendNotes(`## Part ${i + 1}\n\n${generated}`);
+      await streamStudyPack(transcript, {
+        onProgress: (index, total) => {
+          if (isCurrentSession(targetId)) {
+            setBusyText(
+              total > 1
+                ? `Generating study pack… part ${index} of ${total}`
+                : 'Generating study pack…'
+            );
+          }
+        },
+        onDelta: (text) => {
+          accumulated += text;
+          applyIfCurrent(accumulated);
+        },
+        onMerged: (document) => {
+          accumulated = document;
+          applyIfCurrent(document);
+        },
+      });
+      applyIfCurrent(accumulated);
+    } catch (error) {
+      if (isCurrentSession(targetId)) {
+        setError(`${error instanceof Error ? error.message : 'Study pack failed'}. Check OpenCode and try again.`);
       }
     } finally {
-      setBusyText('');
+      if (isCurrentSession(targetId)) setBusyText('');
     }
   }
 

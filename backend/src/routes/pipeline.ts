@@ -7,9 +7,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import {
   STUDY_TIMEOUT_MS,
-  SYSTEM_PROMPT,
   TITLE_SYSTEM,
   askLlm,
+  generateStudyDoc,
+  generateStudyDocStream,
 } from "../llm";
 
 const exec = promisify(execFile);
@@ -70,11 +71,48 @@ router.post("/study", async (req, res) => {
       .status(413)
       .json({ error: `transcript too long (max ${MAX_TRANSCRIPT_CHARS} chars)` });
   try {
-    res.json({ notes: await askLlm(transcript, SYSTEM_PROMPT, STUDY_TIMEOUT_MS) });
+    res.json({ notes: await generateStudyDoc(transcript, STUDY_TIMEOUT_MS) });
   } catch (error) {
     res.status(500).json({
       error: error instanceof Error ? error.message : "notes failed",
     });
+  }
+});
+
+// Same generation, but streamed: chunked transcript, continuous single document.
+router.post("/study/stream", async (req, res) => {
+  const transcript = String(req.body?.transcript ?? "").trim();
+  if (!transcript)
+    return res.status(400).json({ error: "transcript required" });
+  if (transcript.length > MAX_TRANSCRIPT_CHARS)
+    return res
+      .status(413)
+      .json({ error: `transcript too long (max ${MAX_TRANSCRIPT_CHARS} chars)` });
+
+  res.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    connection: "keep-alive",
+  });
+  try {
+    for await (const event of generateStudyDocStream(transcript, STUDY_TIMEOUT_MS)) {
+      if (event.kind === 'progress') {
+        res.write(
+          `data: ${JSON.stringify({ progress: { index: event.index, total: event.total } })}\n\n`,
+        );
+      } else if (event.kind === 'delta') {
+        res.write(`data: ${JSON.stringify({ delta: event.text })}\n\n`);
+      } else {
+        res.write(`data: ${JSON.stringify({ merged: event.document })}\n\n`);
+      }
+    }
+    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+    res.end();
+  } catch (error) {
+    res.write(
+      `data: ${JSON.stringify({ error: error instanceof Error ? error.message : "study pack failed" })}\n\n`,
+    );
+    res.end();
   }
 });
 

@@ -8,7 +8,6 @@ export async function readError(res: Response, body: unknown) {
 }
 
 const transcribeResponse = z.object({ transcript: z.string() });
-const studyResponse = z.object({ notes: z.string() });
 const titleResponse = z.object({ title: z.string() });
 const chatMessageSchema = z.object({
   role: z.enum(['user', 'assistant']),
@@ -25,17 +24,6 @@ export async function transcribeAudio(blob: Blob, name: string) {
   return transcribeResponse.parse(json).transcript;
 }
 
-export async function generateStudyPack(transcript: string) {
-  const res = await fetch('/api/study', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ transcript })
-  });
-  const json = await res.json();
-  if (!res.ok) await readError(res, json);
-  return studyResponse.parse(json).notes;
-}
-
 export async function generateSessionTitle(text: string) {
   const res = await fetch('/api/title', {
     method: 'POST',
@@ -45,6 +33,49 @@ export async function generateSessionTitle(text: string) {
   const json = await res.json();
   if (!res.ok) await readError(res, json);
   return titleResponse.parse(json).title;
+}
+
+/** Streams a single, merged study pack. onDelta fires per token (first chunk),
+ *  onMerged fires with the clean merged document after each chunk, and
+ *  onProgress at each chunk start. */
+export async function streamStudyPack(
+  transcript: string,
+  callbacks: {
+    onDelta?: (delta: string) => void;
+    onMerged?: (document: string) => void;
+    onProgress?: (index: number, total: number) => void;
+  } = {}
+): Promise<void> {
+  const res = await fetch('/api/study/stream', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ transcript })
+  });
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `${res.status} study request failed`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const raw = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      for (const line of raw.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        const payload = JSON.parse(line.slice(5).trim());
+        if (payload.progress) callbacks.onProgress?.(payload.progress.index, payload.progress.total);
+        else if (payload.merged) callbacks.onMerged?.(payload.merged);
+        else if (payload.delta) callbacks.onDelta?.(payload.delta);
+        else if (payload.error) throw new Error(payload.error);
+      }
+    }
+  }
 }
 
 const sessionSchema = z.object({

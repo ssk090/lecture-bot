@@ -18,6 +18,14 @@ export const CHAT_SYSTEM = `You answer questions using ONLY the selected session
 export const TITLE_SYSTEM =
   "Name this study session in 3-7 words. Return only the title, no quotes or punctuation at the end.";
 
+export const STUDY_CONTINUE_SYSTEM = `You are continuing an existing study pack for the same lecture. Append the remaining material to the SAME document.
+
+Strict rules:
+- Do NOT re-emit the top-level headings (High-Level Summary, Structured Notes, High-Yield Points, Flashcards, Practice Quiz). They already exist in the document from the first part.
+- Do NOT add any part, segment, or section markers such as \"Part 1\" or \"Section 2\".
+- Continue in-progress sections and add new bullets, definitions, formulas, flashcards, and quiz items that extend the existing structure, using the transcript below.
+- Output plain, appended study-pack content only.`;
+
 export const STUDY_TIMEOUT_MS = 10 * 60 * 1000;
 export const CHAT_TIMEOUT_MS = 150 * 1000;
 export const MAX_CONTEXT_CHARS = 120_000;
@@ -118,6 +126,141 @@ export async function askLlm(
     out += chunk;
   }
   return out.trim();
+}
+
+export const CHUNK_SIZE = 8000;
+
+/** Split a transcript into continuation-sized chunks at a sentence boundary. */
+export function chunkTranscript(text: string, size = CHUNK_SIZE): string[] {
+  const clean = text.trim();
+  if (!clean) return [];
+  if (clean.length <= size) return [clean];
+  const chunks: string[] = [];
+  let rest = text;
+  while (rest.length > size) {
+    let cut = rest.lastIndexOf("\n", size);
+    if (cut < size * 0.5) cut = rest.lastIndexOf(". ", size);
+    if (cut < size * 0.5) cut = size;
+    chunks.push(rest.slice(0, cut + 1));
+    rest = rest.slice(cut + 1);
+  }
+  if (rest.trim()) chunks.push(rest);
+  return chunks;
+}
+
+/**
+ * Generate ONE study pack document from a (possibly long) transcript. For long
+ * transcripts the first chunk writes the full structure and each following
+ * chunk's continuation is merged into the existing sections, so the output has
+ * no part markers or duplicate "More X" sections.
+ */
+export async function generateStudyDoc(
+  transcript: string,
+  timeoutMs = STUDY_TIMEOUT_MS,
+): Promise<string> {
+  let doc = '';
+  for await (const event of generateStudyDocStream(transcript, timeoutMs)) {
+    if (event.kind === 'merged') doc = event.document;
+  }
+  return doc.trim();
+}
+
+/** Normalize a heading for matching: strip #/level, leading "More ", collapse case. */
+function normHeading(h: string): string {
+  return h.replace(/^\s*#+\s+/, '').replace(/^more\s+/i, '').trim().toLowerCase();
+}
+
+/**
+ * Fold continuation content into the matching existing sections instead of
+ * appending "More X" blocks. Each titled block is merged under the
+ * corresponding top-level section heading in the base document (by exact
+ * heading match, falling back to a contains-match so e.g. "Quiz" lands in
+ * "Practice Quiz").
+ */
+export function mergeContinuation(base: string, addition: string): string {
+  const baseLines = base.split('\n');
+  const headings: { key: string; index: number }[] = [];
+  baseLines.forEach((line, i) => {
+    const m = line.match(/^\s*#+\s+(.+)\s*$/);
+    if (m) headings.push({ key: normHeading(m[1]), index: i });
+  });
+
+  const headingRe = /^\s*#+\s+(.+)\s*$/;
+  const moreRe = /^\s*more\s+(.+)\s*$/i; // model emits "More High-Yield Points" without #
+  const blocks: { original: string | null; lines: string[] }[] = [];
+  let cur: { original: string | null; lines: string[] } | null = null;
+  for (const line of addition.split('\n')) {
+    const heading = line.match(headingRe) ?? line.match(moreRe);
+    if (heading) {
+      if (cur) blocks.push(cur);
+      cur = { original: heading[1].trim(), lines: [] };
+    } else {
+      if (!cur) cur = { original: null, lines: [] };
+      cur.lines.push(line);
+    }
+  }
+  if (cur) blocks.push(cur);
+
+  // Route each titled block into the best-matching base section.
+  const insertions = new Map<number, string[]>();
+  const leftovers: string[] = [];
+  for (const block of blocks) {
+    if (!block.lines.some((l) => l.trim())) continue;
+    if (block.original === null) {
+      leftovers.push(...block.lines);
+      continue;
+    }
+    const key = normHeading(block.original);
+    const best =
+      headings.find((h) => h.key === key) ??
+      headings.find((h) => h.key.includes(key) || key.includes(h.key));
+    if (best) {
+      const arr = insertions.get(best.index) ?? [];
+      insertions.set(best.index, [...arr, ...block.lines]);
+    } else {
+      leftovers.push('', block.original, ...block.lines);
+    }
+  }
+
+  const out: string[] = [];
+  for (let i = 0; i < baseLines.length; i++) {
+    out.push(baseLines[i]);
+    const inserted = insertions.get(i);
+    if (inserted) out.push(...inserted);
+  }
+  if (leftovers.length) out.push(...leftovers);
+  return out.join('\n').replace(/\n{3,}/g, '\n\n');
+}
+
+export type StudyStreamEvent =
+  | { kind: 'progress'; index: number; total: number }
+  | { kind: 'delta'; text: string }
+  | { kind: 'merged'; document: string };
+
+/**
+ * Streaming variant: processes the transcript in small chunks but emits a
+ * single merged document. The first chunk's tokens stream live; each later
+ * chunk's output is merged into the existing sections and a clean merged
+ * snapshot is emitted so the preview stays sectioned (no "More X").
+ */
+export async function* generateStudyDocStream(
+  transcript: string,
+  timeoutMs = STUDY_TIMEOUT_MS,
+): AsyncGenerator<StudyStreamEvent, void, void> {
+  const parts = chunkTranscript(transcript);
+  if (!parts.length) return;
+  let doc = '';
+  for (let i = 0; i < parts.length; i++) {
+    yield { kind: 'progress', index: i + 1, total: parts.length };
+    const system = i === 0 ? SYSTEM_PROMPT : STUDY_CONTINUE_SYSTEM;
+    let raw = '';
+    for await (const chunk of streamLlm(parts[i], system, timeoutMs)) {
+      raw += chunk;
+      if (i === 0) yield { kind: 'delta', text: chunk };
+    }
+    doc = i === 0 ? raw.trim() : mergeContinuation(doc, raw).trim();
+    yield { kind: 'merged', document: doc };
+  }
 }
 
 /** Keep the last MAX_CHAT_MESSAGES so a session doc does not grow forever. */

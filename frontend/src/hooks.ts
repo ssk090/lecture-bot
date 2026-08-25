@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { generateSessionTitle, generateStudyPack, transcribeAudio, updateSession } from './api';
+import { generateSessionTitle, transcribeAudio, updateSession } from './api';
 import { useSession } from './store';
 
 /** Best-effort: name the current session from its transcript/notes. */
@@ -30,17 +30,5 @@ export function useTranscribe() {
       void autoTitle();
     },
     onError: (error) => setError(`${error instanceof Error ? error.message : 'Transcription failed'}. Check Parakeet and try again.`)
-  });
-}
-
-export function useStudyPack() {
-  const { setNotes, setError } = useSession();
-  return useMutation({
-    mutationFn: (transcript: string) => generateStudyPack(transcript),
-    onSuccess: (notes) => {
-      setError('');
-      setNotes(notes);
-    },
-    onError: (error) => setError(`${error instanceof Error ? error.message : 'Study pack failed'}. Check OpenCode and try again.`)
   });
 }
