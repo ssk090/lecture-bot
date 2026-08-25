@@ -575,6 +575,44 @@ textarea {
   font-size: 11px;
   margin: 6px 0;
 }
+.chat-row {
+  max-width: 84%;
+}
+.chat-row.user {
+  justify-self: end;
+}
+.chat-row.assistant {
+  justify-self: start;
+}
+.chat-bubble:hover .chat-actions,
+.chat-actions:focus-within {
+  opacity: 1;
+}
+.chat-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 6px;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.chat-action {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #71717a;
+}
+.chat-action:hover:not(:disabled) {
+  color: #e4e4e7;
+  background: #1c1c20;
+}
+.chat-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
 .chat-bubble {
   max-width: 84%;
   padding: 10px 12px;

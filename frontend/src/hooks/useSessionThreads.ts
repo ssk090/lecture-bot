@@ -49,13 +49,15 @@ export function useSessionThreads(setTab: (tab: 'write' | 'preview') => void, se
 
   async function saveCurrent() {
     if (!notes.trim() && !transcript.trim()) return;
+    const targetId = useSession.getState().sessionId; // anchor to the active session
     setBusy('Saving session…');
     try {
       setError('');
       const title = await generateSessionTitle([transcript, notes].filter(Boolean).join('\n\n'));
-      const result = await saveSession(sessionId, transcript, notes, title);
-      setSessionId(result.id);
+      const result = await saveSession(targetId, transcript, notes, title);
       await updateSession(result.id, { title });
+      // only claim the new id if the user is still on this thread
+      if (useSession.getState().sessionId === targetId) setSessionId(result.id);
       await sessions.refetch();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'Save failed. Is MongoDB running?');

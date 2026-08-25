@@ -26,6 +26,12 @@ export async function sessions() {
   return (await getDb()).collection("sessions");
 }
 
+/** Idempotent startup indexes. Runs best-effort; the caller may catch failures. */
+export async function ensureIndexes(): Promise<void> {
+  const col = await sessions();
+  await col.createIndex({ updatedAt: -1 });
+}
+
 export function toId(id: string): ObjectId | null {
   try {
     return new ObjectId(id);

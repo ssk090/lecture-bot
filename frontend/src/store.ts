@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import type { ChatMessage } from './api';
 
+// Single client-side record for the active session. Every async path that
+// writes here anchors to the session id it started with and abandons the
+// write if the user switches threads mid-flight (see useSessionChatRuntime,
+// useSessionThreads.saveCurrent, App.runStudy).
+
 type SessionState = {
   transcript: string;
   liveTranscript: string;

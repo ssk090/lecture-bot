@@ -1,17 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import { AssistantRuntimeProvider } from '@assistant-ui/react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Download, FileText, Loader2, Mic, Save, Square, Upload, WandSparkles, X } from 'lucide-react';
 import { marked } from 'marked';
 import { useSession } from './store';
 import { chunkTranscript } from './chunk';
-import { useSessionChatRuntime } from './hooks/useSessionChatRuntime';
-import { useStudyPack, useTranscribe } from './hooks';
+import { useAutoTitle, useStudyPack, useTranscribe } from './hooks';
 import { useSessionThreads } from './hooks/useSessionThreads';
-import { SessionThread } from './components/assistant-ui/SessionThread';
 import { GenerationLoader } from './components/GenerationLoader';
 import { Panel } from './components/Panel';
 import { StreamingText } from './components/StreamingText';
 import { ThreadSidebar } from './components/ThreadSidebar';
+
+// assistant-ui (and its ~230 kB) loads only when the chat panel mounts
+const SessionChatPanel = lazy(() => import('./components/assistant-ui/SessionChatPanel'));
 
 export function App() {
   const {
@@ -28,6 +28,7 @@ export function App() {
     setError
   } = useSession();
   const transcribe = useTranscribe();
+  const autoTitle = useAutoTitle();
   const study = useStudyPack();
   const [recording, setRecording] = useState(false);
   const [tick, setTick] = useState(0);
@@ -72,6 +73,7 @@ export function App() {
     if (!file) return;
     setError('');
     setTranscript(await file.text());
+    void autoTitle();
   }
 
   async function start() {
@@ -114,13 +116,16 @@ export function App() {
   async function runStudy() {
     const parts = chunkTranscript(transcript);
     if (!parts.length) return;
+    const targetId = useSession.getState().sessionId; // anchor to the active session
     setError('');
     setTab('write');
     setNotes('');
     try {
       for (let i = 0; i < parts.length; i++) {
+        if (useSession.getState().sessionId !== targetId) break; // user switched threads
         setBusy(`Generating study pack, part ${i + 1} of ${parts.length}…`);
         const notes = await study.mutateAsync(parts[i]);
+        if (useSession.getState().sessionId !== targetId) break;
         appendNotes(`## Part ${i + 1}\n\n${notes}`);
       }
     } finally {
@@ -139,7 +144,6 @@ export function App() {
   }
 
   const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusy);
-  const chatRuntime = useSessionChatRuntime();
 
   const status = busy || (recording ? 'Listening for audio input…' : 'Ready. Add a lecture to begin.');
 
@@ -289,11 +293,9 @@ export function App() {
             )}
           </Panel>
 
-          <Panel label="session chat" hint="answers only from this session" className="chat-panel">
-            <AssistantRuntimeProvider runtime={chatRuntime}>
-              <SessionThread />
-            </AssistantRuntimeProvider>
-          </Panel>
+          <Suspense fallback={<Panel label="session chat" hint="answers only from this session" className="chat-panel"><div className="chat-welcome">Loading chat…</div></Panel>}>
+            <SessionChatPanel />
+          </Suspense>
 
           <footer>
             <span>lecture.bot is a local-first tool for focused learning.</span>

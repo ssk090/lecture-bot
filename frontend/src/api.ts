@@ -106,13 +106,46 @@ export async function deleteSession(id: string) {
   if (!res.ok) await readError(res, json);
 }
 
-export async function askSession(id: string, question: string) {
-  const res = await fetch(`/api/sessions/${id}/chat`, {
+/**
+ * Streams a session-scoped answer over SSE. onDelta fires for every text
+ * chunk; the resolved chat (persisted with the answer) is returned.
+ */
+export async function streamChat(
+  id: string,
+  question: string,
+  onDelta: (delta: string) => void,
+  mode: 'ask' | 'regenerate' = 'ask'
+): Promise<ChatMessage[]> {
+  const res = await fetch(`/api/sessions/${id}/chat/stream`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ question })
+    body: JSON.stringify({ question, mode })
   });
-  const json = await res.json();
-  if (!res.ok) await readError(res, json);
-  return z.object({ answer: z.string(), chat: z.array(chatMessageSchema) }).parse(json);
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.error ?? `${res.status} chat request failed`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let chat: ChatMessage[] = [];
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+      const raw = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 2);
+      for (const line of raw.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        const payload = JSON.parse(line.slice(5).trim());
+        if (payload.delta) onDelta(payload.delta);
+        else if (payload.done) chat = payload.chat;
+        else if (payload.error) throw new Error(payload.error);
+      }
+    }
+  }
+  if (!chat.length) throw new Error('chat stream ended without a response');
+  return chat;
 }
