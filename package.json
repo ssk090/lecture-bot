@@ -1,0 +1,13 @@
+{
+  "scripts": {
+    "dev": "bun --filter './backend' dev & bun --filter './frontend' dev",
+    "build": "bun --filter './backend' build && bun --filter './frontend' build"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "devDependencies": {
+    "typescript": "latest"
+  }
+}
