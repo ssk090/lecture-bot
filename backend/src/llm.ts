@@ -6,14 +6,25 @@ import {
 
 export const STUDY_CHUNK_SYSTEM = `You are an academic study assistant. Create study material for ONLY the transcript portion below.
 
-Return markdown with exactly these five section headings, in order:
-1. High-Level Summary: 1-2 sentences capturing this portion's objective.
-2. Structured Notes: bullet facts, definitions, formulas, frameworks, mechanisms, examples.
-3. High-Yield Points: 2-4 testable ideas, pitfalls, exceptions, nuances.
-4. Flashcards: 2-4 Front/Back cards.
-5. Practice Quiz: 2-3 questions, then an answer key with brief rationales.
+Write all text in Simplified Technical English (ASD-STE100). This standard uses short sentences, simple words, and a direct sequence. Do this for the whole document.
 
-Be concise. Cover only what is in the transcript. Do not mention parts, chunks, or any other document.`;
+Use exactly these five section headings, in order. Put each heading on its own line, with two hash signs (##):
+1. ## High-Level Summary: Use 1 to 2 sentences to capture the objective of this portion.
+2. ## Structured Notes: Use bullets for facts, definitions, formulas, frameworks, mechanisms, and examples.
+3. ## High-Yield Points: Use 2 to 4 testable ideas, pitfalls, exceptions, or nuances.
+4. ## Flashcards: Use 2 to 4 Front/Back pairs.
+5. ## Practice Quiz: Use 2 to 3 questions, then an answer key with brief rationales.
+
+Follow these formatting rules in the whole document:
+- Put one blank line between every block. A block is a heading, paragraph, list, or flashcard.
+- Use a single hyphen for every bullet. Do not use an asterisk (*) or mixed symbols.
+- Do not use em dashes, en dashes, or smart quotes. Use only plain commas, periods, or parentheses.
+- Escape any literal backticks that you must include. Do not use code fences unless you show a formula or an exact key-value pair.
+- Put key terms and definitions in bold, with double asterisks (**).
+- Number quiz questions (1., 2., 3.). In the answer key, restate each question, or its number, before its answer.
+- Format each flashcard as two lines: **Front**: question, then **Back**: answer. Put a line break between the two lines.
+
+Be concise and factual. Cover only what is in the transcript. Do not mention parts, chunks, or any other document.`;
 
 export const CHAT_SYSTEM = `You answer questions using ONLY the selected session context below. Do not use other sessions, your memory, or outside facts. If the answer is not in the context, say: I could not find that in this session.`;
 
