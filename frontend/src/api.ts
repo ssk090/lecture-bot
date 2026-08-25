@@ -67,6 +67,13 @@ export async function listSessions() {
   return z.object({ sessions: z.array(sessionSchema) }).parse(json).sessions;
 }
 
+export async function getSession(id: string): Promise<Session> {
+  const res = await fetch(`/api/sessions/${id}`);
+  const json = await res.json();
+  if (!res.ok) await readError(res, json);
+  return z.object({ session: sessionSchema }).parse(json).session;
+}
+
 export async function createSession(transcript = '', notes = '', title?: string) {
   const res = await fetch('/api/sessions', {
     method: 'POST',

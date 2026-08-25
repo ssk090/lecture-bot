@@ -1,21 +1,25 @@
 import { useMemo, useState } from 'react';
-import { Plus, Search, X } from 'lucide-react';
+import { MessageCircle, Plus, Search, X } from 'lucide-react';
 import type { Session } from '../api';
+import { ConfirmDialog } from './ConfirmDialog';
 
 export function ThreadSidebar({
   sessions,
   activeId,
   onNew,
   onOpen,
+  onAsk,
   onDelete
 }: {
   sessions: Session[];
   activeId: string | null;
   onNew: () => void;
   onOpen: (session: Session) => void;
+  onAsk: (session: Session) => void;
   onDelete: (id: string) => void;
 }) {
   const [query, setQuery] = useState('');
+  const [pendingDelete, setPendingDelete] = useState<Session | null>(null);
   const filtered = useMemo(
     () => sessions.filter((session) => session.title.toLowerCase().includes(query.toLowerCase())),
     [sessions, query]
@@ -43,13 +47,27 @@ export function ThreadSidebar({
               <span>{session.title || 'New session'}</span>
               <small>{session.notes ? 'study pack saved' : session.transcript ? 'transcript only' : 'empty session'}</small>
             </button>
-            <button className="delete-thread" onClick={() => onDelete(session.id)} title="Delete session">
+            <button className="thread-ask" onClick={() => onAsk(session)} title="Ask about this session">
+              <MessageCircle size={14} />
+            </button>
+            <button className="delete-thread" onClick={() => setPendingDelete(session)} title="Delete session">
               <X size={14} />
             </button>
           </div>
         ))}
         {!filtered.length && <p className="empty-thread">No saved sessions yet.</p>}
       </div>
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete session?"
+        message={`This permanently deletes "${pendingDelete?.title ?? 'this session'}" and its saved study pack. This cannot be undone.`}
+        confirmLabel="delete"
+        onConfirm={() => {
+          if (pendingDelete) onDelete(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </aside>
   );
 }

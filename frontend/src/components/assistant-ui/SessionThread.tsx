@@ -1,9 +1,5 @@
-import {
-  ComposerPrimitive,
-  ThreadPrimitive,
-  type ThreadMessage,
-} from '@assistant-ui/react';
-import { Check, Copy, RefreshCw, Trash2 } from 'lucide-react';
+import { ComposerPrimitive, ThreadPrimitive, type ThreadMessage } from '@assistant-ui/react';
+import { BotIcon, Check, Copy, RefreshCw, Send, Trash2, UserIcon } from 'lucide-react';
 import { marked } from 'marked';
 import { useState } from 'react';
 
@@ -44,12 +40,7 @@ function BubbleActions({
         {copied ? <Check size={12} /> : <Copy size={12} />}
       </button>
       {role === 'assistant' && (
-        <button
-          className="chat-action"
-          title="Regenerate"
-          disabled={isRunning}
-          onClick={onRegenerate}
-        >
+        <button className="chat-action" title="Regenerate" disabled={isRunning} onClick={onRegenerate}>
           <RefreshCw size={12} />
         </button>
       )}
@@ -72,7 +63,7 @@ export function SessionThread({
   onDeleteMessage: (role: 'user' | 'assistant', content: string) => void;
 }) {
   return (
-    <ThreadPrimitive.Root>
+    <ThreadPrimitive.Root className="chat-root">
       <ThreadPrimitive.Viewport className="chat-messages">
         <ThreadPrimitive.Empty>
           <div className="chat-welcome">
@@ -85,47 +76,48 @@ export function SessionThread({
         <ThreadPrimitive.Messages>
           {({ message }) => {
             const text = messageText(message);
-            const html = marked.parse(text || '…', { async: false });
+            const isUser = message.role === 'user';
+            const html = marked.parse(text.trim() || '…', { async: false });
             return (
-              <div className={`chat-row ${message.role}`}>
-                <div className={`chat-bubble ${message.role}`}>
-                  <div
-                    className="chat-body"
-                    dangerouslySetInnerHTML={{ __html: html as string }}
-                  />
-                  <BubbleActions
-                    role={message.role}
-                    content={text}
-                    isRunning={isRunning}
-                    onCopy={() => {}}
-                    onRegenerate={onRegenerate}
-                    onDelete={() =>
-                      onDeleteMessage(message.role === 'user' ? 'user' : 'assistant', text)
-                    }
-                  />
+              <div key={`${message.role}-${text.slice(0, 24)}`} className={`chat-row ${isUser ? 'user' : 'assistant'}`}>
+                <span className={`chat-avatar ${isUser ? 'user' : 'assistant'}`} aria-hidden>
+                  {isUser ? <UserIcon size={14} /> : <BotIcon size={14} />}
+                </span>
+                <div className="chat-main">
+                  <div className="chat-meta">
+                    <span className={`chat-name ${isUser ? 'user' : ''}`}>{isUser ? 'You' : 'lecture.bot'}</span>
+                    <span className="chat-detail">{isUser ? 'who is asking' : 'study assistant'}</span>
+                  </div>
+                  <div className="chat-content">
+                    <div className="chat-body" dangerouslySetInnerHTML={{ __html: html as string }} />
+                    <BubbleActions
+                      role={message.role}
+                      content={text}
+                      isRunning={isRunning}
+                      onCopy={() => {}}
+                      onRegenerate={onRegenerate}
+                      onDelete={() => onDeleteMessage(message.role === 'user' ? 'user' : 'assistant', text)}
+                    />
+                  </div>
                 </div>
               </div>
             );
           }}
         </ThreadPrimitive.Messages>
-
-        <ThreadPrimitive.ViewportFooter>
-          <ComposerPrimitive.Root className="chat-composer">
-            <ComposerPrimitive.Input
-              asChild
-              autoFocus={false}
-              placeholder="Ask a question about this session…"
-            >
-              <textarea aria-label="Ask about this session" />
-            </ComposerPrimitive.Input>
-            <ComposerPrimitive.Send disabled={isRunning || !hasContext} asChild>
-              <button className="cli-button primary">
-                {isRunning ? '…' : 'ask'}
-              </button>
-            </ComposerPrimitive.Send>
-          </ComposerPrimitive.Root>
-        </ThreadPrimitive.ViewportFooter>
       </ThreadPrimitive.Viewport>
+
+      {/* Composer lives OUTSIDE the scrollable viewport so it is always
+          pinned to the bottom of the screen and never scrolls away. */}
+      <div className="chat-footer">
+        <ComposerPrimitive.Root className="chat-composer">
+          <ComposerPrimitive.Input asChild autoFocus={false} placeholder="Ask a question about this session…">
+            <textarea aria-label="Ask about this session" />
+          </ComposerPrimitive.Input>
+          <ComposerPrimitive.Send disabled={isRunning || !hasContext} asChild>
+            <button className="cli-button primary">{isRunning ? '…' : 'ask'}</button>
+          </ComposerPrimitive.Send>
+        </ComposerPrimitive.Root>
+      </div>
     </ThreadPrimitive.Root>
   );
 }

@@ -10,8 +10,8 @@ import { Panel } from './components/Panel';
 import { StreamingText } from './components/StreamingText';
 import { ThreadSidebar } from './components/ThreadSidebar';
 
-// assistant-ui (and its ~230 kB) loads only when the chat panel mounts
-const SessionChatPanel = lazy(() => import('./components/assistant-ui/SessionChatPanel'));
+// assistant-ui (and its ~230 kB) loads only when the chat drawer opens
+const ChatDrawer = lazy(() => import('./components/assistant-ui/ChatDrawer'));
 
 export function App() {
   const {
@@ -144,6 +144,8 @@ export function App() {
   }
 
   const { sessions, newSession, openSession, removeSession, saveCurrent } = useSessionThreads(setTab, setBusy);
+  const [drawerId, setDrawerId] = useState<string | null>(null);
+  const drawerSession = drawerId ? sessions.data?.find((s) => s.id === drawerId) : undefined;
 
   const status = busy || (recording ? 'Listening for audio input…' : 'Ready. Add a lecture to begin.');
 
@@ -173,6 +175,7 @@ export function App() {
           activeId={sessionId}
           onNew={newSession}
           onOpen={openSession}
+          onAsk={(session) => setDrawerId(session.id)}
           onDelete={removeSession}
         />
         <div className="content">
@@ -228,18 +231,37 @@ export function App() {
           <div className="transcript-grid">
             <Panel label="live transcript" hint="browser captions">
               <div className="panel-content live-content" aria-live="polite">
-                <div className="py-2">
-                  <GenerationLoader label="Listening..." tick={tick} variant="squares" horizontal />
-                </div>
-                {liveTranscript ? (
-                  <StreamingText
-                    segments={[{ text: liveTranscript }]}
-                    count={wordCount}
-                    streaming={recording}
-                    className="max-w-none min-h-0"
-                  />
+                {recording ? (
+                  <>
+                    <div className="py-2">
+                      <GenerationLoader label="Listening…" tick={tick} variant="squares" horizontal />
+                    </div>
+                    {liveTranscript ? (
+                      <StreamingText
+                        segments={[{ text: liveTranscript }]}
+                        count={wordCount}
+                        streaming
+                        className="max-w-none min-h-0"
+                      />
+                    ) : (
+                      <p>Waiting for speech to be detected…</p>
+                    )}
+                  </>
+                ) : liveTranscript ? (
+                  <>
+                    <StreamingText
+                      segments={[{ text: liveTranscript }]}
+                      count={wordCount}
+                      streaming={false}
+                      className="max-w-none min-h-0"
+                    />
+                    <p className="live-note">Captured by browser captions. Finish it in the final transcript below.</p>
+                  </>
                 ) : (
-                  <p>{'Live transcript will appear here while you record.'}</p>
+                  <p>
+                    Press <span className="mono-inline">start mic</span> to see live captions while you record,
+                    or upload an audio/video file or transcript instead.
+                  </p>
                 )}
               </div>
             </Panel>
@@ -293,16 +315,21 @@ export function App() {
             )}
           </Panel>
 
-          <Suspense fallback={<Panel label="session chat" hint="answers only from this session" className="chat-panel"><div className="chat-welcome">Loading chat…</div></Panel>}>
-            <SessionChatPanel />
-          </Suspense>
-
           <footer>
             <span>lecture.bot is a local-first tool for focused learning.</span>
             <span>parakeet stt / opencode llm</span>
           </footer>
         </div>
       </div>
+      {drawerId && (
+        <Suspense fallback={null}>
+          <ChatDrawer
+            sessionId={drawerId}
+            title={drawerSession?.title}
+            onClose={() => setDrawerId(null)}
+          />
+        </Suspense>
+      )}
     </main>
   );
 }
