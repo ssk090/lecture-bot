@@ -2,21 +2,38 @@ import type { ObjectId } from "mongodb";
 import { sessions as sessionsCol } from "./db";
 import { MAX_CONTEXT_CHARS, capChat } from "./llm";
 
-/** Conversation context = transcript + notes + recent chat, size-capped. */
+/** Conversation context = study pack + transcript + recent chat, size-capped.
+ *  The study pack is the distilled summary of the whole transcript and must
+ *  never be truncated away by a long raw transcript, so it is built first and
+ *  only the transcript tail is cut when the combined context overflows. */
 export function buildChatContext(doc: any) {
   const recent = (doc.chat ?? []).slice(-6);
   const history = recent.map((m: any) => `${m.role}: ${m.content}`).join("\n");
-  const context = [
-    `Transcript:\n${doc.transcript ?? ""}`,
-    `Study pack:\n${doc.notes ?? ""}`,
+  const notes = (doc.notes ?? "").trim();
+  const transcript = (doc.transcript ?? "").trim();
+  const full = [
+    notes ? `Study pack:\n${notes}` : "",
+    transcript ? `Transcript:\n${transcript}` : "",
     history ? `Recent conversation:\n${history}` : "",
   ]
     .join("\n\n")
     .trim();
-  if (context.length > MAX_CONTEXT_CHARS) {
-    return `${context.slice(0, MAX_CONTEXT_CHARS)}\n\n[context truncated]`;
+  if (full.length <= MAX_CONTEXT_CHARS) return full;
+
+  // Over budget: keep the summary whole and fill the head of the transcript,
+  // then the recent conversation, into the remaining room.
+  let context = notes ? `Study pack:\n${notes}` : "";
+  let room = MAX_CONTEXT_CHARS - context.length - "\n\n".length;
+  if (transcript && room > 0) {
+    const kept = transcript.slice(0, room);
+    context += `\n\nTranscript:\n${kept}`;
+    if (kept.length < transcript.length) context += "\n\n[transcript truncated]";
+    room = MAX_CONTEXT_CHARS - context.length - "\n\n".length;
   }
-  return context;
+  if (history && room > 0) {
+    context += `\n\nRecent conversation:\n${history.slice(0, room)}`;
+  }
+  return context.slice(0, MAX_CONTEXT_CHARS);
 }
 
 /** Drops consecutive duplicate user turns (an artifact of an early regenerate

@@ -33,7 +33,9 @@ export const TITLE_SYSTEM =
 
 export const STUDY_TIMEOUT_MS = 10 * 60 * 1000;
 export const CHAT_TIMEOUT_MS = 150 * 1000;
-export const MAX_CONTEXT_CHARS = 120_000;
+// DeepSeek-V4-Flash supports a 1M-token window, so we can afford to keep the
+// full transcript plus its study pack in chat context for ordinary sessions.
+export const MAX_CONTEXT_CHARS = 500_000;
 
 async function setupModel() {
   const model = process.env.OPENCODE_MODEL ?? "opencode-go/deepseek-v4-flash";
